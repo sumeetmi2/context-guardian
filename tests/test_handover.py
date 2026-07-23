@@ -157,6 +157,22 @@ class HandoverGenerateTests(unittest.TestCase):
         self.assertTrue(second["ok"])
         self.assertIn(first_id["lineageId"], second["markdown"])
 
+    def test_generate_inherits_lineage_linked_at_session_start(self):
+        store.atomic_write_json(
+            store.session_json_path(self.cwd, self.session_id),
+            {"sessionId": self.session_id, "parentSessionId": "s0", "lineageId": "cg-inherited"},
+        )
+        cp = checkpoint_mod.build_checkpoint(
+            self.cwd, self.session_id, overrides={"nextAction": "continue prior work"}
+        )
+        checkpoint_mod.write_checkpoint(self.cwd, self.session_id, cp)
+
+        result = handover.generate(self.cwd, self.session_id)
+        self.assertTrue(result["ok"], result["reasons"])
+        handover_state = store.read_json(store.handover_state_json_path(self.cwd, self.session_id))
+        self.assertEqual(handover_state["lineageId"], "cg-inherited")
+        self.assertEqual(handover_state["parentSessionId"], "s0")
+
 
 if __name__ == "__main__":
     unittest.main()

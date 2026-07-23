@@ -7,6 +7,7 @@ MONITORING = {
     "compactThresholdPercent": 84,
     "criticalThresholdPercent": 92,
     "sampleEveryTurns": 1,
+    "renotifyAfterTurns": 8,
 }
 
 
@@ -31,6 +32,21 @@ class ThresholdsTests(unittest.TestCase):
 
     def test_above_critical(self):
         self.assertEqual(thresholds.classify(100, MONITORING), thresholds.CRITICAL)
+
+    def test_should_notify_on_escalation(self):
+        self.assertTrue(thresholds.should_notify(thresholds.WARNING, thresholds.NOMINAL, 0, MONITORING))
+
+    def test_should_notify_on_deescalation(self):
+        self.assertTrue(thresholds.should_notify(thresholds.NOMINAL, thresholds.WARNING, 0, MONITORING))
+
+    def test_should_not_notify_within_renotify_window(self):
+        self.assertFalse(thresholds.should_notify(thresholds.WARNING, thresholds.WARNING, 3, MONITORING))
+
+    def test_should_notify_after_renotify_window(self):
+        self.assertTrue(thresholds.should_notify(thresholds.WARNING, thresholds.WARNING, 8, MONITORING))
+
+    def test_should_not_notify_repeated_nominal(self):
+        self.assertFalse(thresholds.should_notify(thresholds.NOMINAL, thresholds.NOMINAL, 100, MONITORING))
 
     def test_recommended_action_covers_every_status(self):
         for status in [thresholds.NOMINAL, thresholds.WARNING, thresholds.COMPACT,

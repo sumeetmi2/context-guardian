@@ -47,6 +47,8 @@ The percentage is a heuristic (transcript size ÷ estimated context window), not
 
 Nothing changes about how you use Claude Code. As your session grows, `Context Guardian` keeps sampling usage on every prompt. Once you cross the `warning` threshold (72% by default), it injects a short note into context telling you so.
 
+You won't be renotified every single turn after that — only when the status changes again, or every `monitoring.renotifyAfterTurns` turns (8 by default) as a periodic reminder while you stay in a non-nominal status. The usage estimate itself also resets its baseline at each detected compaction, so it reflects the shrunk live context afterward instead of the full (ever-growing) transcript file.
+
 ## 4. Write a checkpoint
 
 Before you plan to compact, or any time you want a durable snapshot, ask Claude to record one:
@@ -77,7 +79,19 @@ claude "Read @/path/to/HANDOVER.md and continue from the documented next action.
 
 Run that in a new terminal/session to pick up exactly where you left off.
 
-## 6. Configure thresholds
+## 6. Check session lineage
+
+Once you've continued from a handover into a new session, that new session automatically links back to the one that generated it — no extra step needed, it happens at `SessionStart`. Check the chain any time with:
+
+```
+/context-guardian:context-lineage
+```
+
+This prints every session in the chain, oldest first, so you can trace a long-running task back through however many handovers it took. A session that never continued from a handover reports itself as a root session — that's expected, not an error.
+
+Driving this from a headless script or the Agent SDK instead of the interactive CLI? See [`docs/PHASE3_SDK_ROLLOVER.md`](PHASE3_SDK_ROLLOVER.md) for a reference wrapper that reads real usage numbers and triggers a handover automatically — something hooks can't do here (see the README's non-goals).
+
+## 7. Configure thresholds
 
 ```
 /context-guardian:context-config
@@ -91,7 +105,7 @@ with no arguments shows the effective merged config. To change a value for this 
 
 This writes to `.claude/context-guardian.json` in your project (not the global user config).
 
-## 7. Disable/enable
+## 8. Disable/enable
 
 ```
 /context-guardian:context-disable

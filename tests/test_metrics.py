@@ -62,6 +62,27 @@ class MetricsTests(unittest.TestCase):
         self.assertIsNone(sample["utilizationPercent"])
         self.assertIsNone(sample["effectiveContextTokens"])
 
+    def test_baseline_subtracted_from_effective_tokens(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text("x" * 40000)
+        tokens, _, _ = metrics.estimate_effective_tokens(str(transcript), baseline_bytes=20000)
+        self.assertEqual(tokens, 5000)
+
+    def test_baseline_larger_than_size_floors_at_zero(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text("x" * 100)
+        tokens, _, _ = metrics.estimate_effective_tokens(str(transcript), baseline_bytes=1_000_000)
+        self.assertEqual(tokens, 0)
+
+    def test_build_metric_sample_applies_baseline(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text("x" * 40000)
+        sample = metrics.build_metric_sample(
+            "s1", 3, str(transcript), context_window_tokens=100000, baseline_bytes=20000
+        )
+        self.assertEqual(sample["effectiveContextTokens"], 5000)
+        self.assertEqual(sample["utilizationPercent"], 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()

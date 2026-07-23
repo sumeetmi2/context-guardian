@@ -194,8 +194,16 @@ def generate(cwd: str, session_id: str, transcript_path=None, turn=None):
     cp = checkpoint_mod.build_checkpoint(cwd, session_id, transcript_path=transcript_path, turn=turn)
 
     existing_handover_state = store.read_json(store.handover_state_json_path(cwd, session_id), default={})
-    lineage_id = existing_handover_state.get("lineageId") or f"cg-{uuid.uuid4().hex[:12]}"
-    parent_session_id = existing_handover_state.get("parentSessionId")
+    session = store.read_json(store.session_json_path(cwd, session_id), default={})
+    # Prefer lineage inherited at session-start time (bin/cg.py:_maybe_link_lineage,
+    # a real cross-session link) over a lineage_id previously minted for this same
+    # session's own handover calls, over minting a fresh one for a root session.
+    lineage_id = (
+        session.get("lineageId")
+        or existing_handover_state.get("lineageId")
+        or f"cg-{uuid.uuid4().hex[:12]}"
+    )
+    parent_session_id = session.get("parentSessionId") or existing_handover_state.get("parentSessionId")
 
     markdown = build_handover_markdown(cwd, session_id, parent_session_id, lineage_id, cp)
     redacted_markdown, secret_count = redact.redact(markdown)

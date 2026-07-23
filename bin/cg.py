@@ -46,10 +46,39 @@ def _init_or_touch_session(cwd, session_id, hook_input):
             "compactionCount": 0,
             "turnCount": 0,
             "status": "active",
+            "transcriptBytesAtLastCompaction": 0,
+            "lastNotifiedStatus": thresholds.NOMINAL,
+            "lastNotifiedTurn": 0,
         }
     store.atomic_write_json(session_path, session)
     store.set_current_session(cwd, session_id)
     return session
+
+
+def _maybe_link_lineage(cwd, session_id, session, previous_session_id):
+    """Link a brand-new session to the prior one iff the prior session
+    explicitly ran /context-handover. That's an intentional continuation
+    signal from the user, not a fabricated inference — see
+    lib/handover.py's lineageId minting.
+    """
+    previous_handover = store.read_json(store.handover_state_json_path(cwd, previous_session_id), default=None)
+    if previous_handover is None:
+        return
+
+    session["parentSessionId"] = previous_session_id
+    session["lineageId"] = previous_handover.get("lineageId")
+    store.atomic_write_json(store.session_json_path(cwd, session_id), session)
+    store.append_event(
+        cwd, session_id, "lineage_linked",
+        parentSessionId=previous_session_id, lineageId=session["lineageId"],
+    )
+
+    previous_session_path = store.session_json_path(cwd, previous_session_id)
+    previous_session = store.read_json(previous_session_path, default=None)
+    if previous_session is not None:
+        previous_session["childSessionId"] = session_id
+        store.atomic_write_json(previous_session_path, previous_session)
+        store.append_event(cwd, previous_session_id, "lineage_linked", childSessionId=session_id)
 
 
 def cmd_hook_session_start(args):
@@ -62,11 +91,23 @@ def cmd_hook_session_start(args):
     if not cfg.get("enabled", True):
         return
 
+    is_new_session = store.read_json(store.session_json_path(cwd, session_id), default=None) is None
+    previous_session_id = store.get_current_session(cwd) if is_new_session else None
+
     session = _init_or_touch_session(cwd, session_id, hook_input)
     store.append_event(cwd, session_id, "session_started", source=source)
 
+    if is_new_session and previous_session_id and previous_session_id != session_id:
+        _maybe_link_lineage(cwd, session_id, session, previous_session_id)
+
     if source == "compact":
         session["compactionCount"] = session.get("compactionCount", 0) + 1
+        transcript_path = hook_input.get("transcript_path")
+        if transcript_path and os.path.exists(transcript_path):
+            try:
+                session["transcriptBytesAtLastCompaction"] = os.path.getsize(transcript_path)
+            except OSError:
+                pass
         store.atomic_write_json(store.session_json_path(cwd, session_id), session)
         store.append_event(cwd, session_id, "compaction_completed", detectedVia="SessionStart:compact")
 
@@ -87,13 +128,18 @@ def cmd_hook_user_prompt_submit(args):
     store.atomic_write_json(store.session_json_path(cwd, session_id), session)
 
     sample = metrics.build_metric_sample(
-        session_id, session["turnCount"], hook_input.get("transcript_path")
+        session_id, session["turnCount"], hook_input.get("transcript_path"),
+        baseline_bytes=session.get("transcriptBytesAtLastCompaction", 0),
     )
     store.append_event(cwd, session_id, "metric_sampled", **sample)
 
     status = thresholds.classify(sample["utilizationPercent"], cfg["monitoring"])
+    previous_status = session.get("lastNotifiedStatus", thresholds.NOMINAL)
+    turns_since_last_notify = session["turnCount"] - session.get("lastNotifiedTurn", 0)
     output = {}
-    if status in (thresholds.WARNING, thresholds.COMPACT, thresholds.CRITICAL):
+    if status in (thresholds.WARNING, thresholds.COMPACT, thresholds.CRITICAL) and thresholds.should_notify(
+        status, previous_status, turns_since_last_notify, cfg["monitoring"]
+    ):
         note = (
             f"Context Guardian: estimated context usage ~{sample['utilizationPercent']}% "
             f"({sample['confidence']} confidence). {thresholds.recommended_action(status)}"
@@ -106,6 +152,9 @@ def cmd_hook_user_prompt_submit(args):
                 "additionalContext": note,
             },
         }
+        session["lastNotifiedTurn"] = session["turnCount"]
+    session["lastNotifiedStatus"] = status
+    store.atomic_write_json(store.session_json_path(cwd, session_id), session)
     print(json.dumps(output))
 
 
@@ -139,7 +188,8 @@ def cmd_hook_stop(args):
 
     session = _init_or_touch_session(cwd, session_id, hook_input)
     sample = metrics.build_metric_sample(
-        session_id, session.get("turnCount", 0), hook_input.get("transcript_path")
+        session_id, session.get("turnCount", 0), hook_input.get("transcript_path"),
+        baseline_bytes=session.get("transcriptBytesAtLastCompaction", 0),
     )
     status = thresholds.classify(sample["utilizationPercent"], cfg["monitoring"])
     store.append_event(cwd, session_id, "metric_sampled", **sample)
@@ -258,6 +308,24 @@ def cmd_handover(args):
         sys.exit(1)
 
 
+def cmd_lineage(args):
+    cwd = os.getcwd()
+    session_id = store.get_current_session(cwd)
+    if not session_id:
+        print("No active session recorded. Lineage needs at least one prior hook event.")
+        sys.exit(1)
+
+    chain = store.walk_lineage(cwd, session_id)
+    if len(chain) <= 1:
+        print(f"Session {session_id} has no recorded lineage — it's a root session (or handovers were never generated).")
+        return
+
+    print(f"Lineage for {session_id} ({len(chain)} sessions, oldest first):")
+    for entry in chain:
+        marker = " <- current" if entry["sessionId"] == session_id else ""
+        print(f"  {entry['sessionId']}  started {entry['startedAt']}  status={entry['status']}{marker}")
+
+
 def cmd_config(args):
     cwd = os.getcwd()
     if args.set:
@@ -311,6 +379,9 @@ def main():
     config_parser = sub.add_parser("config")
     config_parser.add_argument("--set", help="dotted.key=value")
     config_parser.set_defaults(func=cmd_config)
+
+    lineage_parser = sub.add_parser("lineage")
+    lineage_parser.set_defaults(func=cmd_lineage)
 
     disable_parser = sub.add_parser("disable")
     disable_parser.add_argument("--enable", action="store_true", default=False)

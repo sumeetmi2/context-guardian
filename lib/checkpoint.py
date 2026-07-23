@@ -34,10 +34,10 @@ _LIST_NARRATIVE_FIELDS = [
 NARRATIVE_FIELDS = _SCALAR_NARRATIVE_FIELDS + _LIST_NARRATIVE_FIELDS + ["testStatus"]
 
 
-def build_checkpoint(cwd: str, session_id: str, transcript_path=None, turn=None, overrides=None):
+def build_checkpoint(cwd: str, session_id: str, transcript_path=None, turn=None, overrides=None, baseline_bytes=0):
     previous = store.read_json(store.state_json_path(cwd, session_id), default={})
     git_state = gitstate.collect(cwd)
-    sample = metrics.build_metric_sample(session_id, turn, transcript_path)
+    sample = metrics.build_metric_sample(session_id, turn, transcript_path, baseline_bytes=baseline_bytes)
 
     checkpoint = {
         "sessionId": session_id,

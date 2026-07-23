@@ -77,6 +77,45 @@ class StoreTests(unittest.TestCase):
         store.ensure_session_dir(self.cwd, "real")
         self.assertEqual(store.get_current_session(self.cwd), "real")
 
+    def test_walk_lineage_root_session_only(self):
+        store.atomic_write_json(
+            store.session_json_path(self.cwd, "s1"),
+            {"sessionId": "s1", "startedAt": "t1", "status": "active", "parentSessionId": None},
+        )
+        chain = store.walk_lineage(self.cwd, "s1")
+        self.assertEqual([e["sessionId"] for e in chain], ["s1"])
+
+    def test_walk_lineage_chain_oldest_first(self):
+        store.atomic_write_json(
+            store.session_json_path(self.cwd, "s1"),
+            {"sessionId": "s1", "startedAt": "t1", "status": "ended", "parentSessionId": None},
+        )
+        store.atomic_write_json(
+            store.session_json_path(self.cwd, "s2"),
+            {"sessionId": "s2", "startedAt": "t2", "status": "ended", "parentSessionId": "s1"},
+        )
+        store.atomic_write_json(
+            store.session_json_path(self.cwd, "s3"),
+            {"sessionId": "s3", "startedAt": "t3", "status": "active", "parentSessionId": "s2"},
+        )
+        chain = store.walk_lineage(self.cwd, "s3")
+        self.assertEqual([e["sessionId"] for e in chain], ["s1", "s2", "s3"])
+
+    def test_walk_lineage_missing_session_returns_empty(self):
+        self.assertEqual(store.walk_lineage(self.cwd, "nope"), [])
+
+    def test_walk_lineage_breaks_cycle(self):
+        store.atomic_write_json(
+            store.session_json_path(self.cwd, "a"),
+            {"sessionId": "a", "startedAt": "t1", "status": "active", "parentSessionId": "b"},
+        )
+        store.atomic_write_json(
+            store.session_json_path(self.cwd, "b"),
+            {"sessionId": "b", "startedAt": "t2", "status": "active", "parentSessionId": "a"},
+        )
+        chain = store.walk_lineage(self.cwd, "a")
+        self.assertEqual(len(chain), 2)
+
     def test_path_helpers(self):
         self.assertTrue(str(store.session_json_path(self.cwd, "s1")).endswith(
             str(Path("s1") / "session.json")

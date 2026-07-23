@@ -127,6 +127,28 @@ def _latest_session_by_mtime(cwd: str):
     return candidates[0].name
 
 
+def walk_lineage(cwd: str, session_id: str) -> list:
+    """Walk `parentSessionId` backward from `session_id` to the root,
+    returning each session's {sessionId, startedAt, status}, oldest-first.
+    """
+    chain = []
+    seen = set()
+    current_id = session_id
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        session = read_json(session_json_path(cwd, current_id), default=None)
+        if session is None:
+            break
+        chain.append({
+            "sessionId": current_id,
+            "startedAt": session.get("startedAt"),
+            "status": session.get("status"),
+        })
+        current_id = session.get("parentSessionId")
+    chain.reverse()
+    return chain
+
+
 def session_json_path(cwd: str, session_id: str) -> Path:
     return session_dir(cwd, session_id) / "session.json"
 

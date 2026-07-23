@@ -68,6 +68,7 @@ Once loaded, commands are namespaced under the plugin name:
 | `/context-guardian:context-handover` | Generate + validate `HANDOVER.md` for continuing in a new session |
 | `/context-guardian:context-config` | View or update effective config (`key.path=value`) |
 | `/context-guardian:context-disable` | Turn monitoring off/on for this project |
+| `/context-guardian:context-lineage` | Show the chain of sessions this one was continued from, if any |
 
 ## Configuration
 
@@ -78,13 +79,19 @@ Precedence: CLI overrides > project config (`.claude/context-guardian.json`) > u
   "monitoring": {
     "warningThresholdPercent": 72,
     "compactThresholdPercent": 84,
-    "criticalThresholdPercent": 92
+    "criticalThresholdPercent": 92,
+    "renotifyAfterTurns": 8
   },
   "handover": {
     "maximumTokens": 5000
+  },
+  "rollover": {
+    "mode": "off"
   }
 }
 ```
+
+`renotifyAfterTurns` controls notification hysteresis: once past `warning`, you're renotified on any status change, or every N turns as a reminder — not every single turn. `rollover.*` is read by the Phase 3 Agent-SDK wrapper reference, not by the hooks — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md).
 
 Set project-scoped values with `/context-guardian:context-config monitoring.warningThresholdPercent=60`.
 
@@ -101,7 +108,8 @@ lib/
   handover.py     builds + validates HANDOVER.md
   redact.py       pattern-based secret redaction
   config.py       config precedence and merging
-  store.py        atomic JSON/event-log persistence
+  store.py        atomic JSON/event-log persistence, session lineage chain
+  rollover.py     rollover-trigger decision for Agent-SDK wrappers (Phase 3)
 ```
 
 ## Development
@@ -114,9 +122,11 @@ python3 -m unittest discover -s tests -t . -v
 
 ## Roadmap
 
-- **Phase 2:** compaction intelligence (better usage signals, hysteresis).
-- **Phase 3:** wrapper-based rollover for headless/Agent-SDK workflows, where structured usage output actually exists.
-- **Phase 4:** quality tooling, session lineage history, ecosystem polish.
+- **Phase 2 (done):** compaction intelligence — epoch-aware usage estimate, notification hysteresis.
+- **Phase 3 (done):** reference wrapper for headless/Agent-SDK rollover — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md).
+- **Phase 4 (done — lineage; quality tooling still open):** session lineage history (`/context-guardian:context-lineage`) and ecosystem polish (this README, [`CHANGELOG.md`](CHANGELOG.md), [`docs/TUTORIAL.md`](docs/TUTORIAL.md)). Lint/CI quality tooling intentionally deferred.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for details.
 
 ## License
 

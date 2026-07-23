@@ -16,6 +16,7 @@ DEFAULTS = {
         "compactThresholdPercent": 84,
         "criticalThresholdPercent": 92,
         "sampleEveryTurns": 1,
+        "renotifyAfterTurns": 8,
     },
     "compaction": {
         "automatic": False,  # Phase 1: never auto-trigger, see PRD critique pt. 2

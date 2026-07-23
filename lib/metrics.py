@@ -16,10 +16,16 @@ _CONTEXT_WINDOW_FALLBACK = 200_000
 _CHARS_PER_TOKEN_ESTIMATE = 4
 
 
-def estimate_effective_tokens(transcript_path):
+def estimate_effective_tokens(transcript_path, baseline_bytes=0):
     """Heuristic: transcript file size / chars-per-token. measurementType
     is always "estimated" with "low" confidence — this is a proxy, not a
     token count.
+
+    `baseline_bytes` is the transcript size recorded at the last detected
+    compaction. Claude Code's transcript JSONL is append-only and does not
+    shrink after `/compact`, so without subtracting the baseline, usage
+    would appear to keep climbing across a compaction instead of reflecting
+    the actually-shrunk live context.
     """
     if not transcript_path or not os.path.exists(transcript_path):
         return None, "unavailable", "none"
@@ -27,12 +33,13 @@ def estimate_effective_tokens(transcript_path):
         size_bytes = os.path.getsize(transcript_path)
     except OSError:
         return None, "unavailable", "none"
-    estimated_tokens = size_bytes // _CHARS_PER_TOKEN_ESTIMATE
+    effective_bytes = max(0, size_bytes - baseline_bytes)
+    estimated_tokens = effective_bytes // _CHARS_PER_TOKEN_ESTIMATE
     return estimated_tokens, "estimated", "low"
 
 
-def build_metric_sample(session_id, turn, transcript_path, context_window_tokens=None):
-    tokens, measurement_type, confidence = estimate_effective_tokens(transcript_path)
+def build_metric_sample(session_id, turn, transcript_path, context_window_tokens=None, baseline_bytes=0):
+    tokens, measurement_type, confidence = estimate_effective_tokens(transcript_path, baseline_bytes)
     window = context_window_tokens or _CONTEXT_WINDOW_FALLBACK
     utilization_percent = None
     if tokens is not None:
