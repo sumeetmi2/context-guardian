@@ -26,20 +26,23 @@ Long Claude Code sessions eventually hit context limits. `/compact` helps, but c
 
 ## Install
 
-**Option A — load for one session, no install:**
+**Option A — marketplace install (recommended, works from any project, persists across sessions):**
+
+```bash
+claude plugin marketplace add sumeetmi2/context-guardian
+claude plugin install context-guardian@context-guardian
+```
+
+That's it — the plugin is now active in every Claude Code session, in any directory.
+
+**Option B — load for one session only, no install:**
 
 ```bash
 git clone https://github.com/sumeetmi2/context-guardian.git
 claude --plugin-dir ./context-guardian
 ```
 
-**Option B — clone anywhere and point at it every time:**
-
-```bash
-claude --plugin-dir /path/to/context-guardian
-```
-
-There's no marketplace listing yet (Phase 1 is local-only by design). See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a full walkthrough including troubleshooting.
+See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a full walkthrough including troubleshooting.
 
 ## Quick example
 

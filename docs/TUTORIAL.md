@@ -2,24 +2,25 @@
 
 This walks through loading the plugin and using it in a real Claude Code session, end to end.
 
-## 1. Load the plugin
+## 1. Install the plugin
 
-Clone the repo, then start Claude Code pointed at it:
+**Recommended — marketplace install, once, works everywhere:**
+
+```bash
+claude plugin marketplace add sumeetmi2/context-guardian
+claude plugin install context-guardian@context-guardian
+```
+
+Now just run `claude` normally in any project — no flags needed, in any directory, every session.
+
+**Alternative — load for a single session without installing:**
 
 ```bash
 git clone https://github.com/sumeetmi2/context-guardian.git
-cd context-guardian
-claude --plugin-dir .
-```
-
-`--plugin-dir` loads the plugin for that session only — no marketplace or global install needed. You can point it at the repo from any other project directory too:
-
-```bash
-cd ~/my-real-project   # must be a git repo for full functionality — see Troubleshooting
 claude --plugin-dir /path/to/context-guardian
 ```
 
-Note: `--plugin-dir` only controls where the plugin code is *loaded from*. Your project's state and git status are read from wherever you actually run `claude` — your terminal's current directory.
+`--plugin-dir` only controls where the plugin code is *loaded from*. Your project's state and git status are read from wherever you actually run `claude` — your terminal's current directory, which should be a git repo for full functionality (see Troubleshooting).
 
 ## 2. Confirm it's running
 
