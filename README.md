@@ -80,7 +80,8 @@ Precedence: CLI overrides > project config (`.claude/context-guardian.json`) > u
     "warningThresholdPercent": 72,
     "compactThresholdPercent": 84,
     "criticalThresholdPercent": 92,
-    "renotifyAfterTurns": 8
+    "renotifyAfterTurns": 8,
+    "contextWindowTokens": null
   },
   "handover": {
     "maximumTokens": 5000
@@ -92,6 +93,8 @@ Precedence: CLI overrides > project config (`.claude/context-guardian.json`) > u
 ```
 
 `renotifyAfterTurns` controls notification hysteresis: once past `warning`, you're renotified on any status change, or every N turns as a reminder — not every single turn. `rollover.*` is read by the Phase 3 Agent-SDK wrapper reference, not by the hooks — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md).
+
+`contextWindowTokens` is the denominator for the usage percentage. `null` (default) falls back to a rough constant (`lib/metrics.py`) since hook stdin doesn't expose the real window size — set it explicitly to match your actual context window (check `/context` in Claude Code) for an accurate percentage: `/context-guardian:context-config monitoring.contextWindowTokens=967000`.
 
 Set project-scoped values with `/context-guardian:context-config monitoring.warningThresholdPercent=60`.
 

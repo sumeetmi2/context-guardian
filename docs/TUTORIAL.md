@@ -49,6 +49,14 @@ Nothing changes about how you use Claude Code. As your session grows, `Context G
 
 You won't be renotified every single turn after that — only when the status changes again, or every `monitoring.renotifyAfterTurns` turns (8 by default) as a periodic reminder while you stay in a non-nominal status. The usage estimate itself also resets its baseline at each detected compaction, so it reflects the shrunk live context afterward instead of the full (ever-growing) transcript file.
 
+The percentage's denominator is a rough constant by default, since hook stdin doesn't expose your session's real context window size. If the estimate looks far off from what `/context` reports, set it explicitly for this project:
+
+```
+/context-guardian:context-config monitoring.contextWindowTokens=967000
+```
+
+(swap in whatever number `/context` actually shows you).
+
 ## 4. Write a checkpoint
 
 Before you plan to compact, or any time you want a durable snapshot, ask Claude to record one:

@@ -51,6 +51,13 @@ class MetricsTests(unittest.TestCase):
         sample = metrics.build_metric_sample("s1", 1, str(transcript))
         self.assertEqual(sample["contextWindowTokens"], metrics._CONTEXT_WINDOW_FALLBACK)
 
+    def test_fallback_window_reflects_modern_context_sizes(self):
+        # Regression guard: this was 200_000 (Sonnet-3-era), badly
+        # underestimating the denominator for current 500k-1M+ windows and
+        # inflating the reported percentage. See monitoring.contextWindowTokens
+        # for the configurable, accurate override.
+        self.assertGreaterEqual(metrics._CONTEXT_WINDOW_FALLBACK, 1_000_000)
+
     def test_build_metric_sample_caps_utilization_at_100(self):
         transcript = Path(self.cwd) / "transcript.jsonl"
         transcript.write_text("x" * 1_000_000)

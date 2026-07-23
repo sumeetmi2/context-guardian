@@ -17,6 +17,7 @@ DEFAULTS = {
         "criticalThresholdPercent": 92,
         "sampleEveryTurns": 1,
         "renotifyAfterTurns": 8,
+        "contextWindowTokens": None,
     },
     "compaction": {
         "automatic": False,  # Phase 1: never auto-trigger, see PRD critique pt. 2

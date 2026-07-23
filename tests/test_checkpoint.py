@@ -1,7 +1,9 @@
 import tempfile
 import unittest
+from pathlib import Path
 
 from lib import checkpoint as checkpoint_mod
+from lib import config as config_mod
 from lib import store
 
 
@@ -10,8 +12,14 @@ class CheckpointTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.cwd = self._tmp.name
         self.session_id = "s1"
+        # build_checkpoint now reads config (monitoring.contextWindowTokens),
+        # so isolate USER_CONFIG_PATH like test_config.py/test_handover.py do
+        # — a real ~/.claude/context-guardian.json must never leak in here.
+        self._orig_user_path = config_mod.USER_CONFIG_PATH
+        config_mod.USER_CONFIG_PATH = Path(self.cwd) / "fake_home" / "context-guardian.json"
 
     def tearDown(self):
+        config_mod.USER_CONFIG_PATH = self._orig_user_path
         self._tmp.cleanup()
 
     def test_first_checkpoint_has_empty_narrative_fields(self):
@@ -57,6 +65,11 @@ class CheckpointTests(unittest.TestCase):
         checkpoint_mod.write_checkpoint(self.cwd, self.session_id, cp)
         on_disk = store.read_json(store.state_json_path(self.cwd, self.session_id))
         self.assertEqual(on_disk["sessionId"], self.session_id)
+
+    def test_build_checkpoint_honors_configured_context_window(self):
+        config_mod.write_project_config(self.cwd, {"monitoring": {"contextWindowTokens": 500_000}})
+        cp = checkpoint_mod.build_checkpoint(self.cwd, self.session_id)
+        self.assertEqual(cp["utilizationEstimate"]["contextWindowTokens"], 500_000)
 
     def test_write_checkpoint_appends_event(self):
         cp = checkpoint_mod.build_checkpoint(self.cwd, self.session_id)

@@ -129,6 +129,7 @@ def cmd_hook_user_prompt_submit(args):
 
     sample = metrics.build_metric_sample(
         session_id, session["turnCount"], hook_input.get("transcript_path"),
+        context_window_tokens=cfg["monitoring"].get("contextWindowTokens"),
         baseline_bytes=session.get("transcriptBytesAtLastCompaction", 0),
     )
     store.append_event(cwd, session_id, "metric_sampled", **sample)
@@ -189,6 +190,7 @@ def cmd_hook_stop(args):
     session = _init_or_touch_session(cwd, session_id, hook_input)
     sample = metrics.build_metric_sample(
         session_id, session.get("turnCount", 0), hook_input.get("transcript_path"),
+        context_window_tokens=cfg["monitoring"].get("contextWindowTokens"),
         baseline_bytes=session.get("transcriptBytesAtLastCompaction", 0),
     )
     status = thresholds.classify(sample["utilizationPercent"], cfg["monitoring"])

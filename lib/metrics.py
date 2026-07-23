@@ -9,9 +9,13 @@ represented as exact.
 
 import os
 
-# Rough context-window sizes by model family, used only as a fallback
-# denominator for the heuristic estimate. Not authoritative.
-_CONTEXT_WINDOW_FALLBACK = 200_000
+# Fallback denominator when no real window size is configured (see
+# monitoring.contextWindowTokens). Current Claude models commonly ship
+# large (500k-1M+) context windows, varying by tier/beta flags — this is a
+# rough default, not authoritative for any specific session. Set
+# monitoring.contextWindowTokens explicitly (check `/context` in Claude
+# Code for the real number) for an accurate percentage.
+_CONTEXT_WINDOW_FALLBACK = 1_000_000
 
 _CHARS_PER_TOKEN_ESTIMATE = 4
 

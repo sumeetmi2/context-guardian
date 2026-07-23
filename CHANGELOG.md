@@ -14,6 +14,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   status change, or at most every `monitoring.renotifyAfterTurns` turns
   (default 8) while sustained in a non-nominal status, instead of every
   single turn.
+- Fixed: the usage percentage's denominator was hardcoded to 200,000 tokens
+  (Sonnet-3-era), badly underestimating the window for current 500k-1M+
+  models and inflating the reported percentage (e.g. showing ~100% when
+  Claude Code's own `/context` reported ~15%). Bumped the fallback to
+  1,000,000 and added `monitoring.contextWindowTokens` so it can be set
+  accurately per environment instead of guessed.
 
 ### Added — Phase 3: headless/Agent-SDK rollover reference
 - `lib/rollover.py:should_trigger_rollover` — pure decision function for a

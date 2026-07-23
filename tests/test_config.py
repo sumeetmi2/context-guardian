@@ -23,6 +23,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg["monitoring"]["warningThresholdPercent"], 72)
         self.assertFalse(cfg["compaction"]["automatic"])
         self.assertTrue(cfg["enabled"])
+        self.assertIsNone(cfg["monitoring"]["contextWindowTokens"])
+
+    def test_context_window_tokens_can_be_overridden(self):
+        config_mod.write_project_config(self.cwd, {"monitoring": {"contextWindowTokens": 967000}})
+        cfg = config_mod.get_effective_config(self.cwd)
+        self.assertEqual(cfg["monitoring"]["contextWindowTokens"], 967000)
 
     def test_project_config_overrides_defaults(self):
         config_mod.write_project_config(self.cwd, {"monitoring": {"warningThresholdPercent": 50}})
