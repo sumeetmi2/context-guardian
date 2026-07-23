@@ -2,234 +2,179 @@
 
 [![CI](https://github.com/sumeetmi2/context-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/sumeetmi2/context-guardian/actions/workflows/ci.yml)
 
-A Claude Code plugin that watches context/token pressure in a session and lets you generate a durable, structured **handover document** before things get cramped — so a fresh session (or a teammate) can pick up exactly where you left off, without you re-explaining everything from scratch.
+Context Guardian is a Claude Code plugin that watches context/token pressure during a session and produces a validated, structured handover — objective, decisions, files touched, and one concrete next action — so a fresh session or a teammate can continue the work instead of losing it to compaction or a rushed summary.
 
-It observes, estimates, and hands you a ready-to-use continuation doc on request, tracking the chain across sessions so a long-running task stays traceable. It does **not** auto-compact or auto-start new sessions for you in the interactive CLI — see [Non-goals](#non-goals) below.
+## Typical workflow
 
-## Why
+1. **Work normally.** Hooks watch usage in the background — nothing to run per turn.
+2. **Checkpoint** (`/context-guardian:context-checkpoint`) as things develop — records objective, decisions, and next action so far. Optional, but makes step 3 faster and more complete.
+3. **Handover** (`/context-guardian:context-handover`) assembles everything into a validated `HANDOVER.md`. Missing a next action or a required section fails validation — nothing gets written until it's fixed.
+4. **Continue** in a fresh session: tell Claude to read the handover. Starting within 30 minutes auto-links the new session to the old one; otherwise link explicitly with `/context-guardian:context-continue <handoverId>`.
 
-Long Claude Code sessions eventually hit context limits. `/compact` helps, but compaction is lossy, and there's no built-in way to hand off an in-progress task to a brand-new session without losing the thread — objective, decisions made, what's been tried, what's next. Context Guardian's job is to make that handoff explicit, deterministic, and reviewable, instead of relying on memory or an ad-hoc summary at the worst possible moment (right when context is already tight).
+## What gets captured
 
-| | `/compact` | Ad-hoc summary | Context Guardian |
-|---|---|---|---|
-| Continues the same session | Yes | No | No |
-| Starts a fresh, uncluttered context | No | Yes | Yes |
-| Structured next action | Not guaranteed | Not guaranteed | Required (validation fails without one) |
-| Git state captured | No | Usually no | Yes, deterministically |
-| Redacted before writing to disk | No | Usually no | Yes (best-effort, pattern-based) |
-| Validated before being trusted | No | No | Yes |
-| Session lineage tracked | No | No | Yes |
+Objective, decisions (tagged confirmed/inferred/user-provided/unverified/superseded), files changed, commands run, validation status, risks, remaining work, and a required next action.
 
-## What it does
+## Automatic vs. user-triggered
 
-- Tracks context usage every turn from the transcript's real per-turn API usage numbers (labeled `actual`/`high confidence`); falls back to a transcript-size heuristic (`estimated`/`low confidence`) only if a real usage record can't be found.
-- Classifies usage against configurable thresholds (`nominal` → `warning` → `compact` → `critical`) and surfaces a recommendation inline.
-- Writes a checkpoint automatically right before compaction happens (`PreCompact` hook) — this captures deterministic repository state (git branch/diff/changed files) unconditionally; narrative fields (objective, next action, etc.) are only as complete as your last `/context-checkpoint`, since a hook can't itself infer them. Guardian nudges you to run one if none was set.
-- On request, generates `HANDOVER.md` + `handover_state.json`: objective, decisions (tagged confirmed/inferred/user-provided/unverified), files touched, git state, remaining work, and — critically — a single **next action**, so the next session has an unambiguous starting point.
-- Redacts known credential shapes (AWS keys, GitHub/Slack tokens, private key blocks, bearer tokens, etc.) from the handover before it ever touches disk.
-- Refuses to write a handover that's missing a next action, over a token budget, or still contains a detected secret — validation failure prints the reason instead of silently producing a broken doc.
-- Links each new session to the one it continued from, so `/context-guardian:context-lineage` can trace a long task back through however many handovers it took. Auto-linking only fires within 30 minutes of the handover that generated it (a single-use marker, not "any prior handover in this repo"); after that, or from a different terminal, link explicitly with `/context-guardian:context-continue <handoverId>`.
+| | Trigger |
+|---|---|
+| Usage monitoring + threshold notifications | Automatic, every turn (`/context-guardian:context-status` to check anytime) |
+| Pre-compaction git-state checkpoint | Automatic, right before compaction |
+| Narrative checkpoint (objective, decisions, next action) | `/context-guardian:context-checkpoint` |
+| Handover generation + validation | `/context-guardian:context-handover` |
+| Lineage link on session start | Automatic, but short-lived (30 min), single-use, and repo-scoped — see [Limitations](#limitations) |
+| Explicit lineage link | `/context-guardian:context-continue <handoverId>` — the safe choice when starting an unrelated parallel task in the same repo |
 
-## Non-goals
+## Prerequisites
 
-- **No automatic compaction.** There's no supported way for a hook to trigger `/compact` in an interactive session — Context Guardian tells you to run it, it doesn't run it for you.
-- **No automatic rollover in the interactive CLI.** Hooks can't start a new session on your behalf there. A headless/Agent-SDK wrapper *can* — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md) for a reference implementation, opt-in and separate from the hook-driven plugin.
-- **No fabrication.** Narrative fields (objective, decisions, plan) are never guessed — they render as "not recorded" until you (or Claude, acting on your behalf) explicitly set them.
-- **No secret-detection guarantee.** Redaction is pattern-based and best-effort against known credential shapes, not a security boundary.
-- **No guarantee of real usage.** Usage is read from the transcript's real per-turn API accounting when available (`actual`/`high confidence`); if that record can't be found, it falls back to a transcript-size heuristic (`estimated`/`low confidence`) — see `monitoring.contextWindowTokens` below if the denominator still looks off.
+- Claude Code with plugin support
+- Python 3.9+ (standard library only — nothing to install)
+- Git (most features assume a git repository; the plugin degrades gracefully without one)
 
-## Install
-
-**Option A — marketplace install (recommended, works from any project, persists across sessions):**
+## Install from the repository marketplace
 
 ```bash
 claude plugin marketplace add sumeetmi2/context-guardian
 claude plugin install context-guardian@context-guardian
 ```
 
-That's it — the plugin is now active in every Claude Code session, in any directory.
+The first command registers this repository as a plugin source; the second installs the plugin from that source into every Claude Code session, in any directory.
 
-**Option B — load for one session only, no install:**
-
-```bash
-git clone https://github.com/sumeetmi2/context-guardian.git
-claude --plugin-dir ./context-guardian
-```
-
-See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a full walkthrough including troubleshooting.
-
-## Quick example
+**Verify it's working:**
 
 ```
-$ claude --plugin-dir /path/to/context-guardian
-> /context-guardian:context-status
+/context-guardian:context-status
+```
+
+```
 Session: 6736435e-6ebb-4f77-a0d4-0d561152cfb3
 Context: approximately 3.7% (actual, high confidence)
 Status: nominal — no action required
 Turns: 1
 Compactions this session: 0
-Last checkpoint: none yet — run /context-checkpoint
+Last checkpoint: none yet — run /context-guardian:context-checkpoint
+```
+
+**No-install option** (one session only): `git clone https://github.com/sumeetmi2/context-guardian.git && claude --plugin-dir ./context-guardian`.
+
+## Terminal demo
+
+```
+$ claude
+> ...working for a while...
+Context Guardian: actual context usage ~86% (high confidence). run /compact now, or /context-guardian:context-handover immediately
+
+> /context-guardian:context-checkpoint
+Checkpoint written: .claude/context-guardian/sessions/6736435e.../state.json
+
+> /context-guardian:context-handover
+Handover written: .claude/context-guardian/sessions/6736435e.../HANDOVER.md
+
+Continue in a new session with:
+  claude "Read @.../HANDOVER.md and continue from the documented next action."
+
+$ claude "Read @.../HANDOVER.md and continue from the documented next action."
+> /context-guardian:context-status
+Session: 9a1f2c3e-...  (auto-linked, same lineage)
+Context: approximately 2.1% (actual, high confidence)
+Status: nominal — no action required
 ```
 
 ## Sample handover
 
-`/context-guardian:context-handover` produces something like this (trimmed):
-
 ```markdown
-# Session Handover
-
 ## Identity
-- Handover ID: cg-72921739c744
-- Parent session ID: s1
-- Session lineage ID: cg-72921739c744
+- Handover ID: cg-4c0b764f7d0f
+- Source session ID: 6736435e-6ebb-4f77-a0d4-0d561152cfb3
+- Lineage ID: cg-07509a743d42
+- Parent handover ID: none
 - Created time: 2026-07-23T14:49:35+00:00
 - Repository: /path/to/repo
 - Branch: main
 - Commit: a1b2c3d
 
 ## Objective
-Migrate the billing service off the deprecated v1 webhook format.
+Migrate the billing webhook consumer from the deprecated v1 event format to v2 without changing retry, idempotency, or failure-handling semantics.
+
+## Current status
+v2 parser and event mapping are implemented. Focused unit tests pass; the integration test still fails because its fixture sends a v1 payload.
+Test status: 18 passed, 1 failed
 
 ## Decisions made
-- [confirmed] Retries handled via Resilience4j, not custom retry code.
-- [inferred] The v1 format is only referenced in webhook_handler.py and its tests.
+- [confirmed] Retry handling stays in Resilience4j, not custom retry code in the handler.
+- [unverified] The staging webhook simulator supports the v2 signature header format.
 
 ## Files changed
 - src/billing/webhook_handler.py
-- tests/test_webhook_handler.py
+- src/billing/webhook_mapper.py
+- tests/fixtures/webhooks/payment_succeeded_v2.json
+
+## Validation status
+18 unit tests passed. 1 integration test failed: `test_billing_webhooks.py::test_payment_succeeded` — the fixture still sends the v1 payload shape, so the v2 parser never sees a valid input.
+
+## Risks and caveats
+Do not remove the v1 feature flag until staging has processed real v2 events successfully.
 
 ## Remaining work
-- Update the integration test fixture to use v2 payload shape.
-- Re-run the full billing test suite before merging.
+1. Update the integration fixture to send the v2 payload and signature headers.
+2. Re-run the full billing test suite.
 
 ## Next action
-Run `pytest tests/test_webhook_handler.py -k v2` and fix the failing fixture.
+Update `tests/integration/test_billing_webhooks.py` to load the v2 fixture and headers, then run `pytest tests/integration/test_billing_webhooks.py -x`.
+
+## Do not repeat
+Do not add retry handling to `webhook_handler.py` — retry behavior is already centrally configured via Resilience4j.
 ```
 
-Full sections also include: current status, constraints, repository context, files inspected, git state, commands executed, validation status, evidence and references, open questions, risks and caveats, user communication state, and do-not-repeat notes — see `lib/handover.py` for the exact schema.
+Trimmed for length — a real handover also includes Constraints, Repository context, Files inspected, Git state, Commands executed, Evidence and references, Open questions, and User communication state. Full schema in `lib/handover.py`.
+
+## How context is measured
+
+Three things determine the reported percentage, kept separate on purpose:
+
+- **Used-token source** — real per-turn API usage from the transcript when available (`actual`, high confidence — the same accounting Claude Code's own `/context` uses); a byte-size heuristic (`estimated`, low confidence) only if that record can't be found.
+- **Context-window denominator** — `monitoring.contextWindowTokens`, set explicitly to your real window (check `/context`) or a rough built-in constant if unset.
+- **Confidence label** — `high` or `low`, always shown next to the percentage.
+
+The percentage is only as accurate as its denominator and source — treat it as a signal for when to checkpoint or hand over, not an exact reading.
 
 ## Commands
 
-The three you'll use day to day:
-
 | Command | What it does |
 |---|---|
-| `/context-guardian:context-status` | Show current session's estimated usage, status, turn/compaction counts |
-| `/context-guardian:context-checkpoint` | Manually write a checkpoint (objective, decisions, next action, etc.) |
+| `/context-guardian:context-status` | Show current session's usage, status, turn/compaction counts |
+| `/context-guardian:context-checkpoint` | Write a checkpoint (objective, decisions, next action, etc.) |
 | `/context-guardian:context-handover` | Generate + validate `HANDOVER.md` for continuing in a new session |
-
-Less common, administrative:
-
-| Command | What it does |
-|---|---|
-| `/context-guardian:context-lineage` | Show the chain of sessions this one was continued from, if any |
+| `/context-guardian:context-lineage` | Show the chain of sessions this one was continued from |
 | `/context-guardian:context-continue` | Explicitly link this session as a continuation of a prior handover |
 | `/context-guardian:context-config` | View or update effective config (`key.path=value`) |
 | `/context-guardian:context-disable` | Turn monitoring off/on for this project |
 
-## Configuration
+## Limitations
 
-Precedence: CLI overrides > project config (`.claude/context-guardian.json`) > user config (`~/.claude/context-guardian.json`) > defaults.
+- **No automatic `/compact`.** No supported way for a hook to trigger it in an interactive session — Context Guardian tells you to run it.
+- **No automatic rollover in the interactive CLI.** A headless/Agent-SDK wrapper can start a new session on your behalf; hooks can't. See [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md).
+- **No fabrication.** Narrative fields render as "not recorded" until explicitly set — never guessed.
+- **Usage-source fallback.** Falls back to a size heuristic when real per-turn usage isn't available; always labeled so you know which one you're looking at.
+- **Redaction is best-effort**, pattern-based against known credential shapes — not a security boundary.
+- **Lineage auto-link is short-lived, single-use, and repo-scoped**, not "any prior handover in this repo." Starting an unrelated task right after a handover in the same repo won't accidentally link to it; starting the *intended* continuation more than 30 minutes later needs `/context-guardian:context-continue`.
 
-```jsonc
-{
-  "monitoring": {
-    "warningThresholdPercent": 72,
-    "compactThresholdPercent": 84,
-    "criticalThresholdPercent": 92,
-    "renotifyAfterTurns": 8,
-    "contextWindowTokens": null
-  },
-  "handover": {
-    "maximumTokens": 5000
-  },
-  "rollover": {
-    "mode": "off"
-  },
-  "security": {
-    "redactBeforeStateWrite": true,
-    "persistCommands": true,
-    "persistEvidence": true
-  }
-}
-```
+## Documentation
 
-`renotifyAfterTurns` controls notification hysteresis: once past `warning`, you're renotified on any status change, or every N turns as a reminder — not every single turn. `rollover.*` is read by the Phase 3 Agent-SDK wrapper reference, not by the hooks — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md).
+[Tutorial](docs/TUTORIAL.md) · [Configuration reference](docs/CONFIGURATION.md) · [Architecture](docs/ARCHITECTURE.md) · [Changelog](CHANGELOG.md) · [SDK rollover reference](docs/PHASE3_SDK_ROLLOVER.md)
 
-`contextWindowTokens` is the denominator for the usage percentage. `null` (default) falls back to a rough constant (`lib/metrics.py`) since hook stdin doesn't expose the real window size — set it explicitly to match your actual context window (check `/context` in Claude Code) for an accurate percentage: `/context-guardian:context-config monitoring.contextWindowTokens=967000`.
+## Features
 
-Set project-scoped values with `/context-guardian:context-config monitoring.warningThresholdPercent=60`.
-
-`security.redactBeforeStateWrite` (default `true`) applies the same pattern-based redaction used on the rendered handover to every narrative field the moment it's written to `state.json`/`handover_state.json` — not just the final markdown. `persistCommands`/`persistEvidence` (default `true`) let you exclude `commandsExecuted`/`evidence` from disk entirely for stricter setups. None of this makes redaction a security boundary — see [Non-goals](#non-goals).
-
-## How it works
-
-Five Claude Code hooks (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`, `SessionEnd`) call a single Python CLI (`bin/cg.py`) that reads/writes plain JSON under `.claude/context-guardian/` in your project (gitignored by default). No background process, no daemon, no non-stdlib dependencies.
-
-```mermaid
-flowchart TD
-    subgraph hooks["Claude Code lifecycle hooks"]
-        SS[SessionStart]
-        UPS[UserPromptSubmit]
-        PC[PreCompact]
-        STOP[Stop]
-        SE[SessionEnd]
-    end
-
-    SS --> LINK["lineage linking<br/>(pending_continuation.json marker, TTL-gated)"]
-    UPS --> METRIC["metric sample<br/>(transcript usage or size heuristic)"]
-    METRIC --> THRESH["threshold classify + notify<br/>(nominal/warning/compact/critical)"]
-    PC --> CKPT["auto-checkpoint<br/>(git state always; narrative if set)"]
-
-    subgraph commands["Slash commands (Claude-driven)"]
-        CHK["/context-checkpoint<br/>infers narrative fields"]
-        HAND["/context-handover<br/>assembles + validates"]
-        CONT["/context-continue<br/>explicit lineage link"]
-    end
-
-    CHK --> STATE[(state.json)]
-    CKPT --> STATE
-    STATE --> HAND
-    HAND --> VALIDATE{valid?}
-    VALIDATE -->|yes| DOCS["HANDOVER.md + handover_state.json<br/>+ pending_continuation.json"]
-    VALIDATE -->|no| REJECT[print reasons, write nothing]
-    DOCS --> CONT
-
-    SE --> ENDED["session.json: status=ended"]
-```
-
-```
-lib/
-  metrics.py      real usage from transcript API records, heuristic fallback
-  thresholds.py   classify usage, recommend an action
-  gitstate.py     deterministic git state capture (subprocess, no inference)
-  checkpoint.py   pre-compaction / manual checkpoint state
-  handover.py     builds + validates HANDOVER.md
-  redact.py       pattern-based secret redaction
-  config.py       config precedence and merging
-  store.py        atomic JSON/event-log persistence, session lineage chain
-  rollover.py     rollover-trigger decision for Agent-SDK wrappers (Phase 3)
-```
-
-## Development
-
-Zero external dependencies — everything runs on the Python 3 standard library.
-
-```bash
-python3 -m unittest discover -s tests -t . -v
-```
+Real transcript-usage tracking, notification hysteresis, pre-compaction checkpointing, validated handovers with secret redaction, session lineage with explicit continuation, a headless/Agent-SDK rollover reference, and CI (tests + lint + type-check) are all shipped — see the [Changelog](CHANGELOG.md).
 
 ## Roadmap
 
-Usage signals, notification hysteresis, headless/Agent-SDK rollover, session lineage, ruff/mypy, and CI are all shipped — see [`CHANGELOG.md`](CHANGELOG.md) for what changed and when.
-
-Still open:
-
-- Pluggable metric providers (native context-percentage source, once/if the hook payload exposes one) beyond transcript-usage and the size heuristic.
+- Pluggable metric providers — a native context-percentage source, if/once the hook payload exposes one, alongside today's transcript-usage and size-heuristic sources.
 
 ## Contributing
 
-Issues and PRs welcome at [github.com/sumeetmi2/context-guardian](https://github.com/sumeetmi2/context-guardian). See [Development](#development) above to run the tests before submitting.
+Issues and PRs welcome at [github.com/sumeetmi2/context-guardian](https://github.com/sumeetmi2/context-guardian). Run `python3 -m unittest discover -s tests -t . -v` (and `ruff check .`) before submitting — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#development).
 
 ## License
 

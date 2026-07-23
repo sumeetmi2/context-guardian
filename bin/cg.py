@@ -42,6 +42,7 @@ def _init_or_touch_session(cwd, session_id, hook_input):
             "sessionId": session_id,
             "lineageId": None,
             "parentSessionId": None,
+            "parentHandoverId": None,
             "childSessionId": None,
             "repository": cwd,
             "branch": gitstate.collect(cwd).get("branch"),
@@ -61,14 +62,21 @@ def _init_or_touch_session(cwd, session_id, hook_input):
     return session
 
 
-def _link_lineage(cwd, session_id, session, parent_session_id, lineage_id):
-    """Actually perform the parent/child linkage between two sessions."""
+def _link_lineage(cwd, session_id, session, parent_session_id, lineage_id, parent_handover_id):
+    """Actually perform the parent/child linkage between two sessions.
+
+    `parent_session_id` is the session that generated the handover being
+    continued from; `parent_handover_id` is that specific handover's own ID
+    (distinct from `lineage_id`, which is stable across the whole chain —
+    see lib/handover.py's identity fields).
+    """
     session["parentSessionId"] = parent_session_id
+    session["parentHandoverId"] = parent_handover_id
     session["lineageId"] = lineage_id
     store.atomic_write_json(store.session_json_path(cwd, session_id), session)
     store.append_event(
         cwd, session_id, "lineage_linked",
-        parentSessionId=parent_session_id, lineageId=lineage_id,
+        parentSessionId=parent_session_id, parentHandoverId=parent_handover_id, lineageId=lineage_id,
     )
 
     parent_session_path = store.session_json_path(cwd, parent_session_id)
@@ -82,7 +90,7 @@ def _link_lineage(cwd, session_id, session, parent_session_id, lineage_id):
 def _maybe_link_lineage(cwd, session_id, session, previous_session_id):
     """Link a brand-new session to the prior one iff the prior session left
     an unexpired, matching `pending_continuation.json` marker — written only
-    when the user/Claude explicitly ran /context-handover in that prior
+    when the user/Claude explicitly ran /context-guardian:context-handover in that prior
     session and immediately started a follow-up. This is a real,
     single-use continuation signal, not an inference from the mere
     existence of a handover somewhere in this repo's history (which could
@@ -100,7 +108,10 @@ def _maybe_link_lineage(cwd, session_id, session, previous_session_id):
         marker_path.unlink(missing_ok=True)
         return
 
-    _link_lineage(cwd, session_id, session, previous_session_id, marker.get("lineageId"))
+    _link_lineage(
+        cwd, session_id, session, previous_session_id,
+        marker.get("lineageId"), marker.get("handoverId"),
+    )
     marker_path.unlink(missing_ok=True)
 
 
@@ -301,7 +312,7 @@ def cmd_status(args):
     if checkpoints:
         print(f"Last checkpoint: {checkpoints[-1]['timestamp']}")
     else:
-        print("Last checkpoint: none yet — run /context-checkpoint")
+        print("Last checkpoint: none yet — run /context-guardian:context-checkpoint")
 
 
 def cmd_checkpoint(args):
@@ -390,13 +401,16 @@ def cmd_continue(args):
         print(f"No handover found matching id: {args.handover_id}", file=sys.stderr)
         sys.exit(1)
 
-    parent_session_id = handover_state.get("sessionId")
+    parent_session_id = handover_state.get("sourceSessionId")
     if parent_session_id == session_id:
         print("Refusing to link a session to itself.", file=sys.stderr)
         sys.exit(1)
 
     session = store.read_json(store.session_json_path(cwd, session_id), default={})
-    _link_lineage(cwd, session_id, session, parent_session_id, handover_state.get("lineageId"))
+    _link_lineage(
+        cwd, session_id, session, parent_session_id,
+        handover_state.get("lineageId"), handover_state.get("handoverId"),
+    )
     print(f"Linked {session_id} as a continuation of {parent_session_id} (lineage {handover_state.get('lineageId')}).")
 
 

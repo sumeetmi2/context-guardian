@@ -3,6 +3,33 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.4.0
+
+### Changed — distinct handover identity fields (breaking `handover_state.json` schema)
+- `lib/handover.py`: `handoverId` used to be minted once and reused as
+  `lineageId` for an entire chain, so every handover in the same lineage
+  reported the same `handoverId` — wrong, since one lineage can contain many
+  handovers. `parentSessionId` also fell back to the session's own ID for
+  root sessions, reading as "this session is its own parent."
+  Now four distinct fields: `handoverId` (fresh per `generate()` call),
+  `lineageId` (stable across the chain, unchanged behavior),
+  `sourceSessionId` (replaces `sessionId`/`parentSessionId`'s self-fallback —
+  the session that generated this handover), and `parentHandoverId` (the
+  specific prior handover this session's lineage continued from, `none` for
+  a root session — did not exist before). `HANDOVER.md`'s Identity section
+  and `handover_state.json` both reflect the new fields.
+- `bin/cg.py`: `session.json` gains `parentHandoverId`; `cg.py continue`
+  resolves and links all four IDs from the target handover.
+- README rewritten: tighter opener, a "Typical workflow" walkthrough, an
+  automatic-vs-user-triggered table, explicit prerequisites, a post-install
+  verification step, a richer sample handover, and clearer, separated
+  usage-measurement explanation. Deep configuration and architecture detail
+  moved to new `docs/CONFIGURATION.md` and `docs/ARCHITECTURE.md`.
+- Fixed remaining shorthand command references (`/context-checkpoint`,
+  `/context-handover`) in `bin/cg.py` and `lib/thresholds.py` output text to
+  use the full `/context-guardian:context-*` names Claude Code actually
+  registers.
+
 ## 0.3.0
 
 ### Fixed — lineage no longer auto-links unrelated sessions

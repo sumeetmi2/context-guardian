@@ -56,7 +56,7 @@ class LineageLinkingTests(unittest.TestCase):
         self._session("s1")
         store.atomic_write_json(
             store.handover_state_json_path(self.cwd, "s1"),
-            {"handoverId": "cg-old", "lineageId": "cg-old", "sessionId": "s1"},
+            {"handoverId": "cg-old", "lineageId": "cg-old", "sourceSessionId": "s1"},
         )
         new_session = self._session("s2")
         cg._maybe_link_lineage(self.cwd, "s2", new_session, "s1")
@@ -131,7 +131,7 @@ class CmdContinueTests(unittest.TestCase):
         self._session("s1")
         store.atomic_write_json(
             store.handover_state_json_path(self.cwd, "s1"),
-            {"handoverId": "cg-xyz", "lineageId": "cg-xyz", "sessionId": "s1"},
+            {"handoverId": "cg-xyz", "lineageId": "cg-xyz", "sourceSessionId": "s1"},
         )
         self._session("s2")
         store.set_current_session(self.cwd, "s2")
@@ -152,7 +152,7 @@ class CmdContinueTests(unittest.TestCase):
         self._session("s1")
         store.atomic_write_json(
             store.handover_state_json_path(self.cwd, "s1"),
-            {"handoverId": "cg-xyz", "lineageId": "cg-xyz", "sessionId": "s1"},
+            {"handoverId": "cg-xyz", "lineageId": "cg-xyz", "sourceSessionId": "s1"},
         )
         store.set_current_session(self.cwd, "s1")
         with self.assertRaises(SystemExit):
@@ -170,10 +170,10 @@ class FindSessionByHandoverIdTests(unittest.TestCase):
     def test_finds_by_handover_id_or_lineage_id(self):
         store.atomic_write_json(
             store.handover_state_json_path(self.cwd, "s1"),
-            {"handoverId": "cg-h1", "lineageId": "cg-l1", "sessionId": "s1"},
+            {"handoverId": "cg-h1", "lineageId": "cg-l1", "sourceSessionId": "s1"},
         )
-        self.assertEqual(store.find_session_by_handover_id(self.cwd, "cg-h1")["sessionId"], "s1")
-        self.assertEqual(store.find_session_by_handover_id(self.cwd, "cg-l1")["sessionId"], "s1")
+        self.assertEqual(store.find_session_by_handover_id(self.cwd, "cg-h1")["sourceSessionId"], "s1")
+        self.assertEqual(store.find_session_by_handover_id(self.cwd, "cg-l1")["sourceSessionId"], "s1")
         self.assertIsNone(store.find_session_by_handover_id(self.cwd, "cg-nope"))
 
 

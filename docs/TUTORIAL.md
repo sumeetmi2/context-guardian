@@ -38,7 +38,7 @@ Context: approximately 3.7% (actual, high confidence)
 Status: nominal — no action required
 Turns: 1
 Compactions this session: 0
-Last checkpoint: none yet — run /context-checkpoint
+Last checkpoint: none yet — run /context-guardian:context-checkpoint
 ```
 
 The numerator comes from the transcript's real per-turn API usage record when one can be found (labeled `actual`/`high confidence` — the same accounting `/context` uses); if it can't (corrupt or non-standard transcript), it falls back to a file-size heuristic (`estimated`/`low confidence`). Either way it's always labeled so you know how much to trust it.

@@ -37,7 +37,7 @@ def recommended_action(status: str) -> str:
     return {
         NOMINAL: "no action required",
         WARNING: "monitor; consider wrapping up the current sub-task soon",
-        COMPACT: "run /compact soon, or /context-handover before starting new work",
-        CRITICAL: "run /compact now, or /context-handover immediately",
+        COMPACT: "run /compact soon, or /context-guardian:context-handover before starting new work",
+        CRITICAL: "run /compact now, or /context-guardian:context-handover immediately",
         "unknown": "utilization unavailable; monitor turn count manually",
     }[status]

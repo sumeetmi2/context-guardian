@@ -33,16 +33,16 @@ class HandoverValidateTests(unittest.TestCase):
 
     def test_valid_handover_passes(self):
         cp = self._cp(nextAction="run the tests")
-        md = handover.build_handover_markdown("/repo", "s1", None, "cg-1", cp)
-        j = handover.build_handover_json("s1", None, "cg-1", cp)
+        md = handover.build_handover_markdown("/repo", "s1", "cg-h1", "cg-l1", None, cp)
+        j = handover.build_handover_json("s1", "cg-h1", "cg-l1", None, cp)
         ok, reasons = handover.validate(md, j, self.effective_config)
         self.assertTrue(ok, reasons)
         self.assertEqual(reasons, [])
 
     def test_missing_next_action_fails(self):
         cp = self._cp(nextAction=None)
-        md = handover.build_handover_markdown("/repo", "s1", None, "cg-1", cp)
-        j = handover.build_handover_json("s1", None, "cg-1", cp)
+        md = handover.build_handover_markdown("/repo", "s1", "cg-h1", "cg-l1", None, cp)
+        j = handover.build_handover_json("s1", "cg-h1", "cg-l1", None, cp)
         ok, reasons = handover.validate(md, j, self.effective_config)
         self.assertFalse(ok)
         self.assertTrue(any("next action" in r for r in reasons))
@@ -53,8 +53,8 @@ class HandoverValidateTests(unittest.TestCase):
             gitState={"isRepo": False, "toplevel": None, "branch": None, "head": None,
                       "statusShort": [], "diffStat": None, "diffCachedStat": None},
         )
-        md = handover.build_handover_markdown("/tmp/nogit", "s1", None, "cg-1", cp)
-        j = handover.build_handover_json("s1", None, "cg-1", cp)
+        md = handover.build_handover_markdown("/tmp/nogit", "s1", "cg-h1", "cg-l1", None, cp)
+        j = handover.build_handover_json("s1", "cg-h1", "cg-l1", None, cp)
         ok, reasons = handover.validate(md, j, self.effective_config)
         self.assertTrue(ok, reasons)
         self.assertIn("WARNING: no git repository detected", md)
@@ -62,26 +62,39 @@ class HandoverValidateTests(unittest.TestCase):
     def test_secret_in_markdown_fails_validation(self):
         cp = self._cp(nextAction="rotate the leaked key",
                        evidence=["found AKIAABCDEFGHIJKLMNOP in logs"])
-        md = handover.build_handover_markdown("/repo", "s1", None, "cg-1", cp)
-        j = handover.build_handover_json("s1", None, "cg-1", cp)
+        md = handover.build_handover_markdown("/repo", "s1", "cg-h1", "cg-l1", None, cp)
+        j = handover.build_handover_json("s1", "cg-h1", "cg-l1", None, cp)
         ok, reasons = handover.validate(md, j, self.effective_config)
         self.assertFalse(ok)
         self.assertTrue(any("secret" in r for r in reasons))
 
     def test_oversized_handover_fails_validation(self):
         cp = self._cp(nextAction="x", evidence=["y" * 50000])
-        md = handover.build_handover_markdown("/repo", "s1", None, "cg-1", cp)
-        j = handover.build_handover_json("s1", None, "cg-1", cp)
+        md = handover.build_handover_markdown("/repo", "s1", "cg-h1", "cg-l1", None, cp)
+        j = handover.build_handover_json("s1", "cg-h1", "cg-l1", None, cp)
         ok, reasons = handover.validate(md, j, self.effective_config)
         self.assertFalse(ok)
         self.assertTrue(any("exceeds maximumTokens" in r for r in reasons))
 
     def test_all_required_sections_present(self):
         cp = self._cp(nextAction="do it")
-        md = handover.build_handover_markdown("/repo", "s1", None, "cg-1", cp)
+        md = handover.build_handover_markdown("/repo", "s1", "cg-h1", "cg-l1", None, cp)
         for header in ["## Identity", "## Objective", "## Decisions made",
                        "## Git state", "## Next action", "## Do not repeat"]:
             self.assertIn(header, md)
+
+    def test_identity_block_has_four_distinct_ids(self):
+        cp = self._cp(nextAction="do it")
+        md = handover.build_handover_markdown("/repo", "s1", "cg-h1", "cg-l1", "cg-h0", cp)
+        self.assertIn("Handover ID: cg-h1", md)
+        self.assertIn("Source session ID: s1", md)
+        self.assertIn("Lineage ID: cg-l1", md)
+        self.assertIn("Parent handover ID: cg-h0", md)
+
+    def test_identity_block_root_session_shows_none_for_parent_handover(self):
+        cp = self._cp(nextAction="do it")
+        md = handover.build_handover_markdown("/repo", "s1", "cg-h1", "cg-l1", None, cp)
+        self.assertIn("Parent handover ID: none", md)
 
     def test_fact_tag_defaults_to_unverified_for_plain_strings(self):
         self.assertEqual(handover._fact_tag("plain fact"), "[unverified] plain fact")
@@ -151,28 +164,34 @@ class HandoverGenerateTests(unittest.TestCase):
         )
         self.assertIn("AKIAABCDEFGHIJKLMNOP", cp["evidence"][0])
 
-    def test_generate_reuses_lineage_id_across_calls(self):
+    def test_generate_reuses_lineage_id_but_mints_fresh_handover_id(self):
         cp = checkpoint_mod.build_checkpoint(
             self.cwd, self.session_id, overrides={"nextAction": "step one"}
         )
         checkpoint_mod.write_checkpoint(self.cwd, self.session_id, cp)
         first = handover.generate(self.cwd, self.session_id)
+        first_state = store.read_json(store.handover_state_json_path(self.cwd, self.session_id))
 
         cp2 = checkpoint_mod.build_checkpoint(
             self.cwd, self.session_id, overrides={"nextAction": "step two"}
         )
         checkpoint_mod.write_checkpoint(self.cwd, self.session_id, cp2)
         second = handover.generate(self.cwd, self.session_id)
+        second_state = store.read_json(store.handover_state_json_path(self.cwd, self.session_id))
 
-        first_id = store.read_json(store.handover_state_json_path(self.cwd, self.session_id))
         self.assertTrue(first["ok"])
         self.assertTrue(second["ok"])
-        self.assertIn(first_id["lineageId"], second["markdown"])
+        self.assertEqual(first_state["lineageId"], second_state["lineageId"])
+        self.assertNotEqual(first_state["handoverId"], second_state["handoverId"])
+        self.assertIn(second_state["lineageId"], second["markdown"])
 
     def test_generate_inherits_lineage_linked_at_session_start(self):
         store.atomic_write_json(
             store.session_json_path(self.cwd, self.session_id),
-            {"sessionId": self.session_id, "parentSessionId": "s0", "lineageId": "cg-inherited"},
+            {
+                "sessionId": self.session_id, "parentSessionId": "s0",
+                "parentHandoverId": "cg-parent-handover", "lineageId": "cg-inherited",
+            },
         )
         cp = checkpoint_mod.build_checkpoint(
             self.cwd, self.session_id, overrides={"nextAction": "continue prior work"}
@@ -183,7 +202,8 @@ class HandoverGenerateTests(unittest.TestCase):
         self.assertTrue(result["ok"], result["reasons"])
         handover_state = store.read_json(store.handover_state_json_path(self.cwd, self.session_id))
         self.assertEqual(handover_state["lineageId"], "cg-inherited")
-        self.assertEqual(handover_state["parentSessionId"], "s0")
+        self.assertEqual(handover_state["parentHandoverId"], "cg-parent-handover")
+        self.assertEqual(handover_state["sourceSessionId"], self.session_id)
 
 
 if __name__ == "__main__":

@@ -31,12 +31,13 @@ def _fact_tag(item):
     return f"[unverified] {item}"
 
 
-def build_handover_markdown(cwd: str, session_id: str, parent_session_id, lineage_id, cp: dict) -> str:
+def build_handover_markdown(cwd: str, session_id: str, handover_id, lineage_id, parent_handover_id, cp: dict) -> str:
     git_state = cp["gitState"]
     identity = "\n".join([
-        f"- Handover ID: {lineage_id}",
-        f"- Parent session ID: {parent_session_id or session_id}",
-        f"- Session lineage ID: {lineage_id}",
+        f"- Handover ID: {handover_id}",
+        f"- Source session ID: {session_id}",
+        f"- Lineage ID: {lineage_id}",
+        f"- Parent handover ID: {parent_handover_id or 'none'}",
         f"- Created time: {cp['timestamp']}",
         f"- Repository: {git_state.get('toplevel') or cwd}",
         f"- Branch: {git_state.get('branch') or 'unknown'}",
@@ -138,12 +139,12 @@ Git diff summary:
     return md
 
 
-def build_handover_json(session_id, parent_session_id, lineage_id, cp: dict) -> dict:
+def build_handover_json(session_id, handover_id, lineage_id, parent_handover_id, cp: dict) -> dict:
     return {
-        "handoverId": lineage_id,
-        "parentSessionId": parent_session_id or session_id,
-        "sessionId": session_id,
+        "handoverId": handover_id,
+        "sourceSessionId": session_id,
         "lineageId": lineage_id,
+        "parentHandoverId": parent_handover_id,
         "createdAt": cp["timestamp"],
         "objective": cp.get("objective"),
         "nextAction": cp.get("nextAction") or cp.get("nextExpectedAction"),
@@ -175,10 +176,8 @@ def validate(markdown_text: str, handover_json: dict, effective_config: dict):
     if not next_action or "NOT SET" in markdown_text.split("## Next action")[-1][:120]:
         reasons.append("next action is empty — set it before handing over")
 
-    if not handover_json.get("sessionId"):
-        reasons.append("sessionId missing")
-    if not handover_json.get("parentSessionId"):
-        reasons.append("parentSessionId missing")
+    if not handover_json.get("sourceSessionId"):
+        reasons.append("sourceSessionId missing")
 
     _clean, secret_count = redact.redact(markdown_text)
     if secret_count > 0:
@@ -201,16 +200,20 @@ def generate(cwd: str, session_id: str, transcript_path=None, turn=None):
     # Prefer lineage inherited at session-start time (bin/cg.py:_maybe_link_lineage,
     # a real cross-session link) over a lineage_id previously minted for this same
     # session's own handover calls, over minting a fresh one for a root session.
+    # lineageId is stable across every handover in the chain; handoverId
+    # identifies this specific handover artifact and is minted fresh every
+    # call, even when regenerating within the same session.
     lineage_id = (
         session.get("lineageId")
         or existing_handover_state.get("lineageId")
         or f"cg-{uuid.uuid4().hex[:12]}"
     )
-    parent_session_id = session.get("parentSessionId") or existing_handover_state.get("parentSessionId")
+    handover_id = f"cg-{uuid.uuid4().hex[:12]}"
+    parent_handover_id = session.get("parentHandoverId") or existing_handover_state.get("parentHandoverId")
 
-    markdown = build_handover_markdown(cwd, session_id, parent_session_id, lineage_id, cp)
+    markdown = build_handover_markdown(cwd, session_id, handover_id, lineage_id, parent_handover_id, cp)
     redacted_markdown, secret_count = redact.redact(markdown)
-    handover_json = build_handover_json(session_id, parent_session_id, lineage_id, cp)
+    handover_json = build_handover_json(session_id, handover_id, lineage_id, parent_handover_id, cp)
 
     ok, reasons = validate(redacted_markdown, handover_json, effective_config)
 
