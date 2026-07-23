@@ -4,8 +4,7 @@ from pathlib import Path
 
 from lib import checkpoint as checkpoint_mod
 from lib import config as config_mod
-from lib import handover
-from lib import store
+from lib import handover, store
 
 
 class HandoverValidateTests(unittest.TestCase):
@@ -124,6 +123,11 @@ class HandoverGenerateTests(unittest.TestCase):
         self.assertIn("write the README", result["markdown"])
 
     def test_generate_redacts_secrets_before_writing(self):
+        # checkpoint.build_checkpoint's security.redactBeforeStateWrite (default
+        # on) already redacts narrative fields at checkpoint time, so by the
+        # time handover.generate() re-derives cp and redacts the rendered
+        # markdown, the secret is long gone from state.json too — defense in
+        # depth, not just a final markdown-only redaction pass.
         cp = checkpoint_mod.build_checkpoint(
             self.cwd, self.session_id,
             overrides={
@@ -131,13 +135,21 @@ class HandoverGenerateTests(unittest.TestCase):
                 "evidence": ["leaked key AKIAABCDEFGHIJKLMNOP found in commit"],
             },
         )
+        self.assertNotIn("AKIAABCDEFGHIJKLMNOP", cp["evidence"][0])
         checkpoint_mod.write_checkpoint(self.cwd, self.session_id, cp)
 
         result = handover.generate(self.cwd, self.session_id)
         self.assertTrue(result["ok"], result["reasons"])
-        self.assertGreaterEqual(result["redactedSecrets"], 1)
         on_disk = store.handover_md_path(self.cwd, self.session_id).read_text()
         self.assertNotIn("AKIAABCDEFGHIJKLMNOP", on_disk)
+
+    def test_checkpoint_redaction_can_be_disabled(self):
+        config_mod.write_project_config(self.cwd, {"security": {"redactBeforeStateWrite": False}})
+        cp = checkpoint_mod.build_checkpoint(
+            self.cwd, self.session_id,
+            overrides={"evidence": ["leaked key AKIAABCDEFGHIJKLMNOP found in commit"]},
+        )
+        self.assertIn("AKIAABCDEFGHIJKLMNOP", cp["evidence"][0])
 
     def test_generate_reuses_lineage_id_across_calls(self):
         cp = checkpoint_mod.build_checkpoint(

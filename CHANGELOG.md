@@ -3,6 +3,41 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.0
+
+### Fixed — lineage no longer auto-links unrelated sessions
+- `bin/cg.py`/`lib/store.py`: `SessionStart` used to link a new session to
+  the most recent prior session in the repo purely because that prior
+  session had generated a handover at some point — even an unrelated one.
+  Auto-linking now requires a single-use `pending_continuation.json` marker
+  (30-minute TTL) written by `handover`, naming the exact session it
+  continues. Added `cg.py continue <handoverId>` /
+  `/context-guardian:context-continue` as an explicit fallback for later or
+  cross-terminal resumes.
+
+### Changed — checkpoint inference covers the full narrative schema
+- `commands/context-checkpoint.md` now prompts for all 17 narrative fields
+  (previously 5) so mid-session checkpoints carry as much as a handover
+  does. `PreCompact`'s auto-checkpoint now warns when it captured git state
+  only, with no objective/next action set.
+
+### Added — defense-in-depth redaction, security config, CI
+- `lib/redact.py`: `redact_value` recursively redacts narrative fields at
+  every persistence boundary (`state.json`, `handover_state.json`), not
+  just the final rendered handover markdown.
+- New `security` config section: `redactBeforeStateWrite` (default on),
+  `persistCommands`/`persistEvidence` (exclude from disk entirely).
+- `lib/metrics.py`: `rawUtilizationPercent` (uncapped) alongside the capped
+  `utilizationPercent`, surfaced by `cg.py status` as a misconfiguration
+  warning when `contextWindowTokens` is set too small.
+- `UserPromptSubmit` notifications now use `systemMessage` only — dropped
+  the duplicate `hookSpecificOutput.additionalContext` injection, which
+  repeated the same text into model context on every notified turn.
+- `session.json.metricsSource` is now set from the first real sample
+  instead of a hardcoded, often-wrong default.
+- GitHub Actions CI (`.github/workflows/ci.yml`): tests across Python
+  3.9–3.13 on Ubuntu/macOS/Windows, `ruff check`, advisory `mypy`.
+
 ## 0.2.1
 
 ### Fixed — real usage numbers instead of a byte-size guess

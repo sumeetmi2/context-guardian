@@ -37,3 +37,21 @@ def redact(text: str):
         clean, n = pattern.subn(REPLACEMENT, clean)
         count += n
     return clean, count
+
+
+def redact_value(value):
+    """Recursively apply `redact` to every string inside a JSON-shaped
+    value (dict/list/str), leaving other types untouched. Used to sanitize
+    narrative fields at every persistence boundary (state.json,
+    handover_state.json), not just the final rendered handover markdown —
+    a checkpoint field can hold a secret even if it never makes it into a
+    generated handover.
+    """
+    if isinstance(value, str):
+        clean, _count = redact(value)
+        return clean
+    if isinstance(value, list):
+        return [redact_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: redact_value(v) for k, v in value.items()}
+    return value

@@ -48,7 +48,7 @@ def _init_or_touch_session(cwd, session_id, hook_input):
             "startedAt": store._now_iso(),
             "endedAt": None,
             "model": hook_input.get("model", "unknown"),
-            "metricsSource": "heuristic-estimation",
+            "metricsSource": None,  # set from the first real sample — see cmd_hook_user_prompt_submit
             "compactionCount": 0,
             "turnCount": 0,
             "status": "active",
@@ -156,6 +156,7 @@ def cmd_hook_user_prompt_submit(args):
         baseline_bytes=session.get("transcriptBytesAtLastCompaction", 0),
     )
     store.append_event(cwd, session_id, "metric_sampled", **sample)
+    session["metricsSource"] = sample["measurementType"]
 
     status = thresholds.classify(sample["utilizationPercent"], cfg["monitoring"])
     previous_status = session.get("lastNotifiedStatus", thresholds.NOMINAL)
@@ -169,13 +170,11 @@ def cmd_hook_user_prompt_submit(args):
             f"({sample['confidence']} confidence). {thresholds.recommended_action(status)}"
         )
         store.append_event(cwd, session_id, "threshold_crossed", status=status, note=note)
-        output = {
-            "systemMessage": note,
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": note,
-            },
-        }
+        # systemMessage only: a visible-but-silent notification. Also setting
+        # hookSpecificOutput.additionalContext would inject the same text into
+        # the model's context on every notified turn, burning tokens on a
+        # message Claude doesn't need to reason over.
+        output = {"systemMessage": note}
         session["lastNotifiedTurn"] = session["turnCount"]
     session["lastNotifiedStatus"] = status
     store.atomic_write_json(store.session_json_path(cwd, session_id), session)
@@ -287,8 +286,11 @@ def cmd_status(args):
     print(f"Session: {session_id}")
     if last_sample and last_sample.get("utilizationPercent") is not None:
         pct = last_sample["utilizationPercent"]
+        raw_pct = last_sample.get("rawUtilizationPercent", pct)
         status = thresholds.classify(pct, cfg["monitoring"])
         print(f"Context: approximately {pct}% ({last_sample['measurementType']}, {last_sample['confidence']} confidence)")
+        if raw_pct > 100:
+            print(f"WARNING: raw usage is {raw_pct}% before capping — monitoring.contextWindowTokens is likely set too small.")
         print(f"Status: {status} — {thresholds.recommended_action(status)}")
     else:
         print("Context: unavailable (no metric samples recorded yet)")

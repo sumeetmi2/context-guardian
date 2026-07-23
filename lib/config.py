@@ -6,7 +6,6 @@ project + user + defaults.
 """
 
 import json
-import os
 from pathlib import Path
 
 DEFAULTS = {
@@ -44,6 +43,17 @@ DEFAULTS = {
         "localOnly": True,
         "retainDays": 30,
         "includePromptText": False,
+    },
+    "security": {
+        # Redaction on the final handover markdown (lib/redact.redact) is
+        # not a security boundary by itself — see README Non-goals. These
+        # apply the same pattern-based redaction to every narrative field
+        # at the point it's written to disk (state.json, handover_state.json),
+        # not just the rendered handover, and let commands/evidence be
+        # excluded from persistence entirely for stricter setups.
+        "redactBeforeStateWrite": True,
+        "persistCommands": True,
+        "persistEvidence": True,
     },
 }
 

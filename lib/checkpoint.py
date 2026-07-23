@@ -8,7 +8,7 @@ first checkpoint of a session. This is a known Phase 1 limitation, not a bug.
 """
 
 from . import config as config_mod
-from . import gitstate, metrics, store
+from . import gitstate, metrics, redact, store
 
 # Fields carried forward from the previous checkpoint until explicitly
 # overwritten. Scalars default to None, lists default to [].
@@ -38,7 +38,8 @@ NARRATIVE_FIELDS = _SCALAR_NARRATIVE_FIELDS + _LIST_NARRATIVE_FIELDS + ["testSta
 def build_checkpoint(cwd: str, session_id: str, transcript_path=None, turn=None, overrides=None, baseline_bytes=0):
     previous = store.read_json(store.state_json_path(cwd, session_id), default={})
     git_state = gitstate.collect(cwd)
-    context_window_tokens = config_mod.get_effective_config(cwd)["monitoring"].get("contextWindowTokens")
+    cfg = config_mod.get_effective_config(cwd)
+    context_window_tokens = cfg["monitoring"].get("contextWindowTokens")
     sample = metrics.build_metric_sample(
         session_id, turn, transcript_path,
         context_window_tokens=context_window_tokens, baseline_bytes=baseline_bytes,
@@ -62,6 +63,15 @@ def build_checkpoint(cwd: str, session_id: str, transcript_path=None, turn=None,
         for key, value in overrides.items():
             if key in NARRATIVE_FIELDS:
                 checkpoint[key] = value
+
+    security_cfg = cfg.get("security", {})
+    if not security_cfg.get("persistCommands", True):
+        checkpoint["commandsExecuted"] = []
+    if not security_cfg.get("persistEvidence", True):
+        checkpoint["evidence"] = []
+    if security_cfg.get("redactBeforeStateWrite", True):
+        for field in _SCALAR_NARRATIVE_FIELDS + _LIST_NARRATIVE_FIELDS:
+            checkpoint[field] = redact.redact_value(checkpoint[field])
 
     return checkpoint
 

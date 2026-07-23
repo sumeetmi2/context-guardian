@@ -1,5 +1,7 @@
 # Context Guardian
 
+[![CI](https://github.com/sumeetmi2/context-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/sumeetmi2/context-guardian/actions/workflows/ci.yml)
+
 A Claude Code plugin that watches context/token pressure in a session and lets you generate a durable, structured **handover document** before things get cramped — so a fresh session (or a teammate) can pick up exactly where you left off, without you re-explaining everything from scratch.
 
 It observes, estimates, and hands you a ready-to-use continuation doc on request, tracking the chain across sessions so a long-running task stays traceable. It does **not** auto-compact or auto-start new sessions for you in the interactive CLI — see [Non-goals](#non-goals) below.
@@ -8,11 +10,21 @@ It observes, estimates, and hands you a ready-to-use continuation doc on request
 
 Long Claude Code sessions eventually hit context limits. `/compact` helps, but compaction is lossy, and there's no built-in way to hand off an in-progress task to a brand-new session without losing the thread — objective, decisions made, what's been tried, what's next. Context Guardian's job is to make that handoff explicit, deterministic, and reviewable, instead of relying on memory or an ad-hoc summary at the worst possible moment (right when context is already tight).
 
+| | `/compact` | Ad-hoc summary | Context Guardian |
+|---|---|---|---|
+| Continues the same session | Yes | No | No |
+| Starts a fresh, uncluttered context | No | Yes | Yes |
+| Structured next action | Not guaranteed | Not guaranteed | Required (validation fails without one) |
+| Git state captured | No | Usually no | Yes, deterministically |
+| Redacted before writing to disk | No | Usually no | Yes (best-effort, pattern-based) |
+| Validated before being trusted | No | No | Yes |
+| Session lineage tracked | No | No | Yes |
+
 ## What it does
 
 - Tracks context usage every turn from the transcript's real per-turn API usage numbers (labeled `actual`/`high confidence`); falls back to a transcript-size heuristic (`estimated`/`low confidence`) only if a real usage record can't be found.
 - Classifies usage against configurable thresholds (`nominal` → `warning` → `compact` → `critical`) and surfaces a recommendation inline.
-- Writes a checkpoint automatically right before compaction happens (`PreCompact` hook).
+- Writes a checkpoint automatically right before compaction happens (`PreCompact` hook) — this captures deterministic repository state (git branch/diff/changed files) unconditionally; narrative fields (objective, next action, etc.) are only as complete as your last `/context-checkpoint`, since a hook can't itself infer them. Guardian nudges you to run one if none was set.
 - On request, generates `HANDOVER.md` + `handover_state.json`: objective, decisions (tagged confirmed/inferred/user-provided/unverified), files touched, git state, remaining work, and — critically — a single **next action**, so the next session has an unambiguous starting point.
 - Redacts known credential shapes (AWS keys, GitHub/Slack tokens, private key blocks, bearer tokens, etc.) from the handover before it ever touches disk.
 - Refuses to write a handover that's missing a next action, over a token budget, or still contains a detected secret — validation failure prints the reason instead of silently producing a broken doc.
@@ -59,19 +71,61 @@ Compactions this session: 0
 Last checkpoint: none yet — run /context-checkpoint
 ```
 
+## Sample handover
+
+`/context-guardian:context-handover` produces something like this (trimmed):
+
+```markdown
+# Session Handover
+
+## Identity
+- Handover ID: cg-72921739c744
+- Parent session ID: s1
+- Session lineage ID: cg-72921739c744
+- Created time: 2026-07-23T14:49:35+00:00
+- Repository: /path/to/repo
+- Branch: main
+- Commit: a1b2c3d
+
+## Objective
+Migrate the billing service off the deprecated v1 webhook format.
+
+## Decisions made
+- [confirmed] Retries handled via Resilience4j, not custom retry code.
+- [inferred] The v1 format is only referenced in webhook_handler.py and its tests.
+
+## Files changed
+- src/billing/webhook_handler.py
+- tests/test_webhook_handler.py
+
+## Remaining work
+- Update the integration test fixture to use v2 payload shape.
+- Re-run the full billing test suite before merging.
+
+## Next action
+Run `pytest tests/test_webhook_handler.py -k v2` and fix the failing fixture.
+```
+
+Full sections also include: current status, constraints, repository context, files inspected, git state, commands executed, validation status, evidence and references, open questions, risks and caveats, user communication state, and do-not-repeat notes — see `lib/handover.py` for the exact schema.
+
 ## Commands
 
-Once loaded, commands are namespaced under the plugin name:
+The three you'll use day to day:
 
 | Command | What it does |
 |---|---|
 | `/context-guardian:context-status` | Show current session's estimated usage, status, turn/compaction counts |
 | `/context-guardian:context-checkpoint` | Manually write a checkpoint (objective, decisions, next action, etc.) |
 | `/context-guardian:context-handover` | Generate + validate `HANDOVER.md` for continuing in a new session |
-| `/context-guardian:context-config` | View or update effective config (`key.path=value`) |
-| `/context-guardian:context-disable` | Turn monitoring off/on for this project |
+
+Less common, administrative:
+
+| Command | What it does |
+|---|---|
 | `/context-guardian:context-lineage` | Show the chain of sessions this one was continued from, if any |
 | `/context-guardian:context-continue` | Explicitly link this session as a continuation of a prior handover |
+| `/context-guardian:context-config` | View or update effective config (`key.path=value`) |
+| `/context-guardian:context-disable` | Turn monitoring off/on for this project |
 
 ## Configuration
 
@@ -91,6 +145,11 @@ Precedence: CLI overrides > project config (`.claude/context-guardian.json`) > u
   },
   "rollover": {
     "mode": "off"
+  },
+  "security": {
+    "redactBeforeStateWrite": true,
+    "persistCommands": true,
+    "persistEvidence": true
   }
 }
 ```
@@ -101,9 +160,43 @@ Precedence: CLI overrides > project config (`.claude/context-guardian.json`) > u
 
 Set project-scoped values with `/context-guardian:context-config monitoring.warningThresholdPercent=60`.
 
+`security.redactBeforeStateWrite` (default `true`) applies the same pattern-based redaction used on the rendered handover to every narrative field the moment it's written to `state.json`/`handover_state.json` — not just the final markdown. `persistCommands`/`persistEvidence` (default `true`) let you exclude `commandsExecuted`/`evidence` from disk entirely for stricter setups. None of this makes redaction a security boundary — see [Non-goals](#non-goals).
+
 ## How it works
 
 Five Claude Code hooks (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`, `SessionEnd`) call a single Python CLI (`bin/cg.py`) that reads/writes plain JSON under `.claude/context-guardian/` in your project (gitignored by default). No background process, no daemon, no non-stdlib dependencies.
+
+```mermaid
+flowchart TD
+    subgraph hooks["Claude Code lifecycle hooks"]
+        SS[SessionStart]
+        UPS[UserPromptSubmit]
+        PC[PreCompact]
+        STOP[Stop]
+        SE[SessionEnd]
+    end
+
+    SS --> LINK["lineage linking<br/>(pending_continuation.json marker, TTL-gated)"]
+    UPS --> METRIC["metric sample<br/>(transcript usage or size heuristic)"]
+    METRIC --> THRESH["threshold classify + notify<br/>(nominal/warning/compact/critical)"]
+    PC --> CKPT["auto-checkpoint<br/>(git state always; narrative if set)"]
+
+    subgraph commands["Slash commands (Claude-driven)"]
+        CHK["/context-checkpoint<br/>infers narrative fields"]
+        HAND["/context-handover<br/>assembles + validates"]
+        CONT["/context-continue<br/>explicit lineage link"]
+    end
+
+    CHK --> STATE[(state.json)]
+    CKPT --> STATE
+    STATE --> HAND
+    HAND --> VALIDATE{valid?}
+    VALIDATE -->|yes| DOCS["HANDOVER.md + handover_state.json<br/>+ pending_continuation.json"]
+    VALIDATE -->|no| REJECT[print reasons, write nothing]
+    DOCS --> CONT
+
+    SE --> ENDED["session.json: status=ended"]
+```
 
 ```
 lib/
@@ -128,11 +221,11 @@ python3 -m unittest discover -s tests -t . -v
 
 ## Roadmap
 
-Usage signals, notification hysteresis, headless/Agent-SDK rollover, and session lineage are all shipped — see [`CHANGELOG.md`](CHANGELOG.md) for what changed and when.
+Usage signals, notification hysteresis, headless/Agent-SDK rollover, session lineage, ruff/mypy, and CI are all shipped — see [`CHANGELOG.md`](CHANGELOG.md) for what changed and when.
 
 Still open:
 
-- Lint/type-check config (ruff/mypy) and a CI workflow for the test suite.
+- Pluggable metric providers (native context-percentage source, once/if the hook payload exposes one) beyond transcript-usage and the size heuristic.
 
 ## Contributing
 

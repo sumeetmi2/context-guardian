@@ -7,7 +7,7 @@ atomic (write-to-temp + rename) since a hook can be interrupted mid-write.
 import json
 import os
 import tempfile
-import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 STATE_DIRNAME = os.path.join(".claude", "context-guardian")
@@ -187,4 +187,4 @@ def find_session_by_handover_id(cwd: str, handover_id: str):
 
 
 def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    return datetime.now(timezone.utc).isoformat()

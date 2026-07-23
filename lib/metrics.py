@@ -101,8 +101,10 @@ def build_metric_sample(session_id, turn, transcript_path, context_window_tokens
     tokens, measurement_type, confidence = estimate_effective_tokens(transcript_path, baseline_bytes)
     window = context_window_tokens or _CONTEXT_WINDOW_FALLBACK
     utilization_percent = None
+    raw_utilization_percent = None
     if tokens is not None:
-        utilization_percent = min(100, round((tokens / window) * 100, 1))
+        raw_utilization_percent = round((tokens / window) * 100, 1)
+        utilization_percent = min(100, raw_utilization_percent)
 
     return {
         "sessionId": session_id,
@@ -110,6 +112,10 @@ def build_metric_sample(session_id, turn, transcript_path, context_window_tokens
         "effectiveContextTokens": tokens,
         "contextWindowTokens": window,
         "utilizationPercent": utilization_percent,
+        # Uncapped — >100 signals a misconfigured contextWindowTokens (too
+        # small) rather than real over-capacity usage, since the API would
+        # reject a request that actually exceeded the window.
+        "rawUtilizationPercent": raw_utilization_percent,
         "measurementType": measurement_type,
         "confidence": confidence,
     }
