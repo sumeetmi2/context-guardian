@@ -2,7 +2,7 @@
 
 A Claude Code plugin that watches context/token pressure in a session and lets you generate a durable, structured **handover document** before things get cramped — so a fresh session (or a teammate) can pick up exactly where you left off, without you re-explaining everything from scratch.
 
-Phase 1 (this release): **visibility + manual checkpointing.** It observes, estimates, and hands you a ready-to-use continuation doc on request. It does **not** auto-compact or auto-start new sessions for you — see [Non-goals](#non-goals-phase-1) below.
+It observes, estimates, and hands you a ready-to-use continuation doc on request, tracking the chain across sessions so a long-running task stays traceable. It does **not** auto-compact or auto-start new sessions for you in the interactive CLI — see [Non-goals](#non-goals) below.
 
 ## Why
 
@@ -16,13 +16,15 @@ Long Claude Code sessions eventually hit context limits. `/compact` helps, but c
 - On request, generates `HANDOVER.md` + `handover_state.json`: objective, decisions (tagged confirmed/inferred/user-provided/unverified), files touched, git state, remaining work, and — critically — a single **next action**, so the next session has an unambiguous starting point.
 - Redacts known credential shapes (AWS keys, GitHub/Slack tokens, private key blocks, bearer tokens, etc.) from the handover before it ever touches disk.
 - Refuses to write a handover that's missing a next action, over a token budget, or still contains a detected secret — validation failure prints the reason instead of silently producing a broken doc.
+- Links each new session to the one it continued from (when that prior session generated a handover), so `/context-guardian:context-lineage` can trace a long task back through however many handovers it took.
 
-## Non-goals (Phase 1)
+## Non-goals
 
 - **No automatic compaction.** There's no supported way for a hook to trigger `/compact` in an interactive session — Context Guardian tells you to run it, it doesn't run it for you.
-- **No automatic rollover.** It never starts a new session on your behalf.
-- **No fabrication.** Narrative fields (objective, decisions, plan) are never guessed — they render as "Not recorded in Phase 1" until you (or Claude, acting on your behalf during a session) explicitly set them.
+- **No automatic rollover in the interactive CLI.** Hooks can't start a new session on your behalf there. A headless/Agent-SDK wrapper *can* — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md) for a reference implementation, opt-in and separate from the hook-driven plugin.
+- **No fabrication.** Narrative fields (objective, decisions, plan) are never guessed — they render as "not recorded" until you (or Claude, acting on your behalf) explicitly set them.
 - **No secret-detection guarantee.** Redaction is pattern-based and best-effort against known credential shapes, not a security boundary.
+- **No exact token counts.** Usage is a transcript-size heuristic, always labeled `estimated`/`low confidence` — see `monitoring.contextWindowTokens` below if the estimate looks off.
 
 ## Install
 
@@ -125,11 +127,15 @@ python3 -m unittest discover -s tests -t . -v
 
 ## Roadmap
 
-- **Phase 2 (done):** compaction intelligence — epoch-aware usage estimate, notification hysteresis.
-- **Phase 3 (done):** reference wrapper for headless/Agent-SDK rollover — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md).
-- **Phase 4 (done — lineage; quality tooling still open):** session lineage history (`/context-guardian:context-lineage`) and ecosystem polish (this README, [`CHANGELOG.md`](CHANGELOG.md), [`docs/TUTORIAL.md`](docs/TUTORIAL.md)). Lint/CI quality tooling intentionally deferred.
+Usage signals, notification hysteresis, headless/Agent-SDK rollover, and session lineage are all shipped — see [`CHANGELOG.md`](CHANGELOG.md) for what changed and when.
 
-See [`CHANGELOG.md`](CHANGELOG.md) for details.
+Still open:
+
+- Lint/type-check config (ruff/mypy) and a CI workflow for the test suite.
+
+## Contributing
+
+Issues and PRs welcome at [github.com/sumeetmi2/context-guardian](https://github.com/sumeetmi2/context-guardian). See [Development](#development) above to run the tests before submitting.
 
 ## License
 
