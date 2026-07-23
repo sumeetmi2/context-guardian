@@ -13,6 +13,7 @@ from pathlib import Path
 STATE_DIRNAME = os.path.join(".claude", "context-guardian")
 SESSIONS_DIRNAME = "sessions"
 CURRENT_POINTER_FILENAME = "current_session"
+PENDING_CONTINUATION_FILENAME = "pending_continuation.json"
 
 
 def state_root(cwd: str) -> Path:
@@ -163,6 +164,26 @@ def handover_md_path(cwd: str, session_id: str) -> Path:
 
 def handover_state_json_path(cwd: str, session_id: str) -> Path:
     return session_dir(cwd, session_id) / "handover_state.json"
+
+
+def pending_continuation_json_path(cwd: str) -> Path:
+    return state_root(cwd) / PENDING_CONTINUATION_FILENAME
+
+
+def find_session_by_handover_id(cwd: str, handover_id: str):
+    """Search every session's handover_state.json for a matching handoverId
+    or lineageId. Returns the handover_state dict, or None if not found.
+    """
+    root = sessions_root(cwd)
+    if not root.exists():
+        return None
+    for session_path in root.iterdir():
+        if not session_path.is_dir():
+            continue
+        state = read_json(session_path / "handover_state.json", default=None)
+        if state and (state.get("handoverId") == handover_id or state.get("lineageId") == handover_id):
+            return state
+    return None
 
 
 def _now_iso() -> str:

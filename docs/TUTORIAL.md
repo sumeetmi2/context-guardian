@@ -89,7 +89,13 @@ Run that in a new terminal/session to pick up exactly where you left off.
 
 ## 6. Check session lineage
 
-Once you've continued from a handover into a new session, that new session automatically links back to the one that generated it — no extra step needed, it happens at `SessionStart`. Check the chain any time with:
+If you continue from a handover into a new session within 30 minutes, that new session automatically links back to the one that generated it at `SessionStart` — no extra step needed. Past that window, or if you're resuming in a different terminal, link it explicitly:
+
+```
+/context-guardian:context-continue <handoverId>
+```
+
+(the handover ID is printed both by `/context-guardian:context-handover` and in the "Identity" section of `HANDOVER.md`). Check the chain any time with:
 
 ```
 /context-guardian:context-lineage

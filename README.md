@@ -16,7 +16,7 @@ Long Claude Code sessions eventually hit context limits. `/compact` helps, but c
 - On request, generates `HANDOVER.md` + `handover_state.json`: objective, decisions (tagged confirmed/inferred/user-provided/unverified), files touched, git state, remaining work, and — critically — a single **next action**, so the next session has an unambiguous starting point.
 - Redacts known credential shapes (AWS keys, GitHub/Slack tokens, private key blocks, bearer tokens, etc.) from the handover before it ever touches disk.
 - Refuses to write a handover that's missing a next action, over a token budget, or still contains a detected secret — validation failure prints the reason instead of silently producing a broken doc.
-- Links each new session to the one it continued from (when that prior session generated a handover), so `/context-guardian:context-lineage` can trace a long task back through however many handovers it took.
+- Links each new session to the one it continued from, so `/context-guardian:context-lineage` can trace a long task back through however many handovers it took. Auto-linking only fires within 30 minutes of the handover that generated it (a single-use marker, not "any prior handover in this repo"); after that, or from a different terminal, link explicitly with `/context-guardian:context-continue <handoverId>`.
 
 ## Non-goals
 
@@ -71,6 +71,7 @@ Once loaded, commands are namespaced under the plugin name:
 | `/context-guardian:context-config` | View or update effective config (`key.path=value`) |
 | `/context-guardian:context-disable` | Turn monitoring off/on for this project |
 | `/context-guardian:context-lineage` | Show the chain of sessions this one was continued from, if any |
+| `/context-guardian:context-continue` | Explicitly link this session as a continuation of a prior handover |
 
 ## Configuration
 

@@ -5,7 +5,7 @@ argument-hint: "[optional notes to fold into the handover]"
 
 Generate a Context Guardian handover for the current session so a future session (or teammate) can continue the work without re-deriving it.
 
-1. Review the conversation so far and any notes in $ARGUMENTS. Assemble, where you have real information (never fabricate — omit rather than guess):
+1. Review the conversation so far and any notes in $ARGUMENTS. If `/context-guardian:context-checkpoint` already ran recently in this session, most fields may already be set — only fill gaps or update anything that's changed since, don't re-derive everything from scratch. Assemble, where you have real information (never fabricate — omit rather than guess):
    - `objective`, `currentPlan`, `lastCompletedAction`, `nextExpectedAction`, `testStatus` — plain strings.
    - `nextAction` — one concrete, specific next step (required — the handover will fail validation without it).
    - `decisions`, `constraints`, `filesInspected`, `commandsExecuted`, `evidence`, `pendingQuestions`, `risks`, `remainingWork`, `doNotRepeat` — JSON arrays of short strings (or `{"text": "...", "status": "confirmed|inferred|user-provided|unverified|superseded"}` objects for `decisions`/`constraints` to tag confidence per the PRD's fact-vs-assumption requirement).

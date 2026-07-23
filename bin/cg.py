@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,6 +17,11 @@ from lib import config as config_mod  # noqa: E402
 from lib import gitstate  # noqa: E402
 from lib import handover as handover_mod  # noqa: E402
 from lib import metrics, store, thresholds  # noqa: E402
+
+# How long a handover's "pending continuation" marker stays eligible for
+# automatic SessionStart linking before it must be linked explicitly via
+# `cg.py continue <handoverId>` instead.
+PENDING_CONTINUATION_TTL_SECONDS = 30 * 60
 
 
 def _read_stdin_json():
@@ -55,30 +61,47 @@ def _init_or_touch_session(cwd, session_id, hook_input):
     return session
 
 
-def _maybe_link_lineage(cwd, session_id, session, previous_session_id):
-    """Link a brand-new session to the prior one iff the prior session
-    explicitly ran /context-handover. That's an intentional continuation
-    signal from the user, not a fabricated inference — see
-    lib/handover.py's lineageId minting.
-    """
-    previous_handover = store.read_json(store.handover_state_json_path(cwd, previous_session_id), default=None)
-    if previous_handover is None:
-        return
-
-    session["parentSessionId"] = previous_session_id
-    session["lineageId"] = previous_handover.get("lineageId")
+def _link_lineage(cwd, session_id, session, parent_session_id, lineage_id):
+    """Actually perform the parent/child linkage between two sessions."""
+    session["parentSessionId"] = parent_session_id
+    session["lineageId"] = lineage_id
     store.atomic_write_json(store.session_json_path(cwd, session_id), session)
     store.append_event(
         cwd, session_id, "lineage_linked",
-        parentSessionId=previous_session_id, lineageId=session["lineageId"],
+        parentSessionId=parent_session_id, lineageId=lineage_id,
     )
 
-    previous_session_path = store.session_json_path(cwd, previous_session_id)
-    previous_session = store.read_json(previous_session_path, default=None)
-    if previous_session is not None:
-        previous_session["childSessionId"] = session_id
-        store.atomic_write_json(previous_session_path, previous_session)
-        store.append_event(cwd, previous_session_id, "lineage_linked", childSessionId=session_id)
+    parent_session_path = store.session_json_path(cwd, parent_session_id)
+    parent_session = store.read_json(parent_session_path, default=None)
+    if parent_session is not None:
+        parent_session["childSessionId"] = session_id
+        store.atomic_write_json(parent_session_path, parent_session)
+        store.append_event(cwd, parent_session_id, "lineage_linked", childSessionId=session_id)
+
+
+def _maybe_link_lineage(cwd, session_id, session, previous_session_id):
+    """Link a brand-new session to the prior one iff the prior session left
+    an unexpired, matching `pending_continuation.json` marker — written only
+    when the user/Claude explicitly ran /context-handover in that prior
+    session and immediately started a follow-up. This is a real,
+    single-use continuation signal, not an inference from the mere
+    existence of a handover somewhere in this repo's history (which could
+    be unrelated work). The marker is consumed on use; sessions started
+    later than the TTL, or in any other case, must link explicitly via
+    `cg.py continue <handoverId>`.
+    """
+    marker_path = store.pending_continuation_json_path(cwd)
+    marker = store.read_json(marker_path, default=None)
+    if marker is None:
+        return
+    if marker.get("sessionId") != previous_session_id:
+        return
+    if time.time() > marker.get("expiresAt", 0):
+        marker_path.unlink(missing_ok=True)
+        return
+
+    _link_lineage(cwd, session_id, session, previous_session_id, marker.get("lineageId"))
+    marker_path.unlink(missing_ok=True)
 
 
 def cmd_hook_session_start(args):
@@ -175,7 +198,20 @@ def cmd_hook_pre_compact(args):
     )
     checkpoint_mod.write_checkpoint(cwd, session_id, cp)
     store.append_event(cwd, session_id, "compaction_requested", trigger=trigger)
-    print(json.dumps({}))
+
+    output = {}
+    if not cp.get("nextAction") and not cp.get("objective"):
+        # This auto-checkpoint only carries forward whatever narrative fields
+        # were already set — if none ever were, it's just git state. Nudge
+        # toward the richer, prompt-driven checkpoint next time, before the
+        # narrative context this compaction is about to drop is gone.
+        note = (
+            "Context Guardian: auto-checkpoint before compaction captured git state only "
+            "(no objective/next action recorded). Run /context-guardian:context-checkpoint "
+            "earlier next time to preserve narrative state through compaction."
+        )
+        output = {"systemMessage": note}
+    print(json.dumps(output))
 
 
 def cmd_hook_stop(args):
@@ -298,11 +334,23 @@ def cmd_handover(args):
 
     result = handover_mod.generate(cwd, session_id)
     if result["ok"]:
+        handover_state = store.read_json(store.handover_state_json_path(cwd, session_id), default={})
+        store.atomic_write_json(store.pending_continuation_json_path(cwd), {
+            "sessionId": session_id,
+            "lineageId": handover_state.get("lineageId"),
+            "handoverId": handover_state.get("handoverId"),
+            "expiresAt": time.time() + PENDING_CONTINUATION_TTL_SECONDS,
+        })
         print(f"Handover written: {result['path']}")
         if result["redactedSecrets"]:
             print(f"Redacted {result['redactedSecrets']} potential secret(s) before writing.")
         print()
         print(f'Continue in a new session with:\n  claude "Read @{result["path"]} and continue from the documented next action."')
+        print(
+            f"If that next session starts within {PENDING_CONTINUATION_TTL_SECONDS // 60} minutes, "
+            "it will auto-link to this one. After that (or from a different terminal/session), link explicitly with:\n"
+            f'  python3 "${{CLAUDE_PLUGIN_ROOT}}/bin/cg.py" continue {handover_state.get("handoverId")}'
+        )
     else:
         print("Handover validation FAILED — not written:")
         for reason in result["reasons"]:
@@ -326,6 +374,28 @@ def cmd_lineage(args):
     for entry in chain:
         marker = " <- current" if entry["sessionId"] == session_id else ""
         print(f"  {entry['sessionId']}  started {entry['startedAt']}  status={entry['status']}{marker}")
+
+
+def cmd_continue(args):
+    cwd = os.getcwd()
+    session_id = store.get_current_session(cwd)
+    if not session_id:
+        print("No active session recorded. `continue` needs at least one prior hook event.")
+        sys.exit(1)
+
+    handover_state = store.find_session_by_handover_id(cwd, args.handover_id)
+    if handover_state is None:
+        print(f"No handover found matching id: {args.handover_id}", file=sys.stderr)
+        sys.exit(1)
+
+    parent_session_id = handover_state.get("sessionId")
+    if parent_session_id == session_id:
+        print("Refusing to link a session to itself.", file=sys.stderr)
+        sys.exit(1)
+
+    session = store.read_json(store.session_json_path(cwd, session_id), default={})
+    _link_lineage(cwd, session_id, session, parent_session_id, handover_state.get("lineageId"))
+    print(f"Linked {session_id} as a continuation of {parent_session_id} (lineage {handover_state.get('lineageId')}).")
 
 
 def cmd_config(args):
@@ -384,6 +454,10 @@ def main():
 
     lineage_parser = sub.add_parser("lineage")
     lineage_parser.set_defaults(func=cmd_lineage)
+
+    continue_parser = sub.add_parser("continue")
+    continue_parser.add_argument("handover_id", help="handoverId or lineageId printed by a prior `handover` run")
+    continue_parser.set_defaults(func=cmd_continue)
 
     disable_parser = sub.add_parser("disable")
     disable_parser.add_argument("--enable", action="store_true", default=False)
