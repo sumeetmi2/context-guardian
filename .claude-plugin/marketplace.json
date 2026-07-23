@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "context-guardian",
+  "description": "Monitors Claude Code context/token pressure and generates durable session handovers before context becomes constrained.",
+  "owner": {
+    "name": "sumeetmi2",
+    "url": "https://github.com/sumeetmi2"
+  },
+  "plugins": [
+    {
+      "name": "context-guardian",
+      "description": "Monitors Claude Code context/token pressure and generates durable session handovers before context becomes constrained. Phase 1: visibility + manual checkpointing (no automatic compaction or rollover).",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
