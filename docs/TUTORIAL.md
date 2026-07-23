@@ -34,22 +34,22 @@ You'll see something like:
 
 ```
 Session: 6736435e-6ebb-4f77-a0d4-0d561152cfb3
-Context: approximately 3.7% (estimated, low confidence)
+Context: approximately 3.7% (actual, high confidence)
 Status: nominal — no action required
 Turns: 1
 Compactions this session: 0
 Last checkpoint: none yet — run /context-checkpoint
 ```
 
-The percentage is a heuristic (transcript size ÷ estimated context window), not an exact token count — Claude Code doesn't expose that to hooks today. It's always labeled with its measurement type and confidence so you know how much to trust it.
+The numerator comes from the transcript's real per-turn API usage record when one can be found (labeled `actual`/`high confidence` — the same accounting `/context` uses); if it can't (corrupt or non-standard transcript), it falls back to a file-size heuristic (`estimated`/`low confidence`). Either way it's always labeled so you know how much to trust it.
 
 ## 3. Work normally
 
 Nothing changes about how you use Claude Code. As your session grows, `Context Guardian` keeps sampling usage on every prompt. Once you cross the `warning` threshold (72% by default), it injects a short note into context telling you so.
 
-You won't be renotified every single turn after that — only when the status changes again, or every `monitoring.renotifyAfterTurns` turns (8 by default) as a periodic reminder while you stay in a non-nominal status. The usage estimate itself also resets its baseline at each detected compaction, so it reflects the shrunk live context afterward instead of the full (ever-growing) transcript file.
+You won't be renotified every single turn after that — only when the status changes again, or every `monitoring.renotifyAfterTurns` turns (8 by default) as a periodic reminder while you stay in a non-nominal status.
 
-The percentage's denominator is a rough constant by default, since hook stdin doesn't expose your session's real context window size. If the estimate looks far off from what `/context` reports, set it explicitly for this project:
+The percentage's denominator (the context window size) is a rough constant by default, since hook stdin doesn't expose your session's real window size. If the estimate looks far off from what `/context` reports, set it explicitly for this project:
 
 ```
 /context-guardian:context-config monitoring.contextWindowTokens=967000

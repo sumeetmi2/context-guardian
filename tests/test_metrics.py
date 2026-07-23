@@ -1,8 +1,24 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from lib import metrics
+
+
+def _assistant_line(input_tokens=0, cache_creation=0, cache_read=0, output_tokens=0):
+    return json.dumps({
+        "type": "assistant",
+        "message": {
+            "model": "claude-sonnet-5",
+            "usage": {
+                "input_tokens": input_tokens,
+                "cache_creation_input_tokens": cache_creation,
+                "cache_read_input_tokens": cache_read,
+                "output_tokens": output_tokens,
+            },
+        },
+    })
 
 
 class MetricsTests(unittest.TestCase):
@@ -89,6 +105,56 @@ class MetricsTests(unittest.TestCase):
         )
         self.assertEqual(sample["effectiveContextTokens"], 5000)
         self.assertEqual(sample["utilizationPercent"], 5.0)
+
+    def test_real_usage_preferred_over_heuristic(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text(_assistant_line(input_tokens=100, cache_creation=200, cache_read=700) + "\n")
+        tokens, measurement_type, confidence = metrics.estimate_effective_tokens(str(transcript))
+        self.assertEqual(tokens, 1000)
+        self.assertEqual(measurement_type, "actual")
+        self.assertEqual(confidence, "high")
+
+    def test_real_usage_uses_most_recent_assistant_turn(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        lines = [
+            _assistant_line(input_tokens=10, cache_creation=0, cache_read=0),
+            json.dumps({"type": "user", "message": {"content": "tool result"}}),
+            _assistant_line(input_tokens=50, cache_creation=25, cache_read=25),
+        ]
+        transcript.write_text("\n".join(lines) + "\n")
+        tokens, measurement_type, _ = metrics.estimate_effective_tokens(str(transcript))
+        self.assertEqual(tokens, 100)
+        self.assertEqual(measurement_type, "actual")
+
+    def test_real_usage_ignores_baseline_bytes(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text(_assistant_line(input_tokens=100, cache_creation=0, cache_read=0) + "\n")
+        tokens, _, _ = metrics.estimate_effective_tokens(str(transcript), baseline_bytes=1_000_000)
+        self.assertEqual(tokens, 100)
+
+    def test_falls_back_to_heuristic_when_no_assistant_usage_present(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n")
+        tokens, measurement_type, confidence = metrics.estimate_effective_tokens(str(transcript))
+        self.assertEqual(measurement_type, "estimated")
+        self.assertEqual(confidence, "low")
+        self.assertIsNotNone(tokens)
+
+    def test_falls_back_to_heuristic_on_corrupt_trailing_line(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text("not valid json at all\n")
+        tokens, measurement_type, _ = metrics.estimate_effective_tokens(str(transcript))
+        self.assertEqual(measurement_type, "estimated")
+        self.assertIsNotNone(tokens)
+
+    def test_build_metric_sample_uses_real_usage(self):
+        transcript = Path(self.cwd) / "transcript.jsonl"
+        transcript.write_text(_assistant_line(input_tokens=100, cache_creation=0, cache_read=900) + "\n")
+        sample = metrics.build_metric_sample("s1", 1, str(transcript), context_window_tokens=1000)
+        self.assertEqual(sample["effectiveContextTokens"], 1000)
+        self.assertEqual(sample["utilizationPercent"], 100.0)
+        self.assertEqual(sample["measurementType"], "actual")
+        self.assertEqual(sample["confidence"], "high")
 
 
 if __name__ == "__main__":

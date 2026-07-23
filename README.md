@@ -10,7 +10,7 @@ Long Claude Code sessions eventually hit context limits. `/compact` helps, but c
 
 ## What it does
 
-- Estimates context usage every turn (transcript-size heuristic — Claude Code doesn't expose exact token counts to hooks, so every number is labeled `estimated`/`low confidence`, never presented as exact).
+- Tracks context usage every turn from the transcript's real per-turn API usage numbers (labeled `actual`/`high confidence`); falls back to a transcript-size heuristic (`estimated`/`low confidence`) only if a real usage record can't be found.
 - Classifies usage against configurable thresholds (`nominal` → `warning` → `compact` → `critical`) and surfaces a recommendation inline.
 - Writes a checkpoint automatically right before compaction happens (`PreCompact` hook).
 - On request, generates `HANDOVER.md` + `handover_state.json`: objective, decisions (tagged confirmed/inferred/user-provided/unverified), files touched, git state, remaining work, and — critically — a single **next action**, so the next session has an unambiguous starting point.
@@ -24,7 +24,7 @@ Long Claude Code sessions eventually hit context limits. `/compact` helps, but c
 - **No automatic rollover in the interactive CLI.** Hooks can't start a new session on your behalf there. A headless/Agent-SDK wrapper *can* — see [`docs/PHASE3_SDK_ROLLOVER.md`](docs/PHASE3_SDK_ROLLOVER.md) for a reference implementation, opt-in and separate from the hook-driven plugin.
 - **No fabrication.** Narrative fields (objective, decisions, plan) are never guessed — they render as "not recorded" until you (or Claude, acting on your behalf) explicitly set them.
 - **No secret-detection guarantee.** Redaction is pattern-based and best-effort against known credential shapes, not a security boundary.
-- **No exact token counts.** Usage is a transcript-size heuristic, always labeled `estimated`/`low confidence` — see `monitoring.contextWindowTokens` below if the estimate looks off.
+- **No guarantee of real usage.** Usage is read from the transcript's real per-turn API accounting when available (`actual`/`high confidence`); if that record can't be found, it falls back to a transcript-size heuristic (`estimated`/`low confidence`) — see `monitoring.contextWindowTokens` below if the denominator still looks off.
 
 ## Install
 
@@ -52,7 +52,7 @@ See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a full walkthrough including trou
 $ claude --plugin-dir /path/to/context-guardian
 > /context-guardian:context-status
 Session: 6736435e-6ebb-4f77-a0d4-0d561152cfb3
-Context: approximately 3.7% (estimated, low confidence)
+Context: approximately 3.7% (actual, high confidence)
 Status: nominal — no action required
 Turns: 1
 Compactions this session: 0
@@ -106,7 +106,7 @@ Five Claude Code hooks (`SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`
 
 ```
 lib/
-  metrics.py      estimate context usage from transcript size
+  metrics.py      real usage from transcript API records, heuristic fallback
   thresholds.py   classify usage, recommend an action
   gitstate.py     deterministic git state capture (subprocess, no inference)
   checkpoint.py   pre-compaction / manual checkpoint state

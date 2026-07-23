@@ -142,7 +142,7 @@ def cmd_hook_user_prompt_submit(args):
         status, previous_status, turns_since_last_notify, cfg["monitoring"]
     ):
         note = (
-            f"Context Guardian: estimated context usage ~{sample['utilizationPercent']}% "
+            f"Context Guardian: {sample['measurementType']} context usage ~{sample['utilizationPercent']}% "
             f"({sample['confidence']} confidence). {thresholds.recommended_action(status)}"
         )
         store.append_event(cwd, session_id, "threshold_crossed", status=status, note=note)

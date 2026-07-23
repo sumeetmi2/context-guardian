@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.2.1
+
+### Fixed — real usage numbers instead of a byte-size guess
+- `lib/metrics.py`: the numerator was a pure file-size heuristic
+  (`transcript_bytes // 4`), always labeled `estimated`/`low confidence`.
+  Every assistant turn in the transcript actually carries the API's real
+  `usage` block (`input_tokens` + `cache_creation_input_tokens` +
+  `cache_read_input_tokens`) — the same accounting Claude Code's own
+  `/context` is built on. Now parsed from the transcript's most recent
+  assistant turn and labeled `actual`/`high confidence`; the byte-size
+  heuristic is kept only as a fallback if a real usage record can't be
+  found. Fixes reports of the plugin showing ~100% utilization on a session
+  where `/context` reported ~15%.
+- The notification message in `bin/cg.py` no longer hardcodes the word
+  "estimated" — it now reflects the sample's real `measurementType`.
+- Since real usage numbers already reflect post-compaction context size on
+  their own (the API only counts current context), the Phase 2 baseline
+  tracking now only matters for the heuristic fallback path.
+
 ## 0.2.0
 
 ### Added — Phase 2: usage signals + hysteresis
