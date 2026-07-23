@@ -100,10 +100,11 @@ def cmd_hook_user_prompt_submit(args):
         )
         store.append_event(cwd, session_id, "threshold_crossed", status=status, note=note)
         output = {
+            "systemMessage": note,
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
                 "additionalContext": note,
-            }
+            },
         }
     print(json.dumps(output))
 
