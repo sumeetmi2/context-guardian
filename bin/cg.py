@@ -411,7 +411,7 @@ def cmd_config(args):
             parsed_value = json.loads(value)
         except json.JSONDecodeError:
             parsed_value = value
-        patch = {}
+        patch: dict = {}
         cursor = patch
         parts = key.split(".")
         for part in parts[:-1]:

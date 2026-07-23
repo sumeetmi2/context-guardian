@@ -7,6 +7,7 @@ project + user + defaults.
 
 import json
 from pathlib import Path
+from typing import Optional
 
 DEFAULTS = {
     "enabled": True,
@@ -84,7 +85,7 @@ def _load_json_file(path: Path):
         return {}
 
 
-def get_effective_config(cwd: str, overrides: dict = None) -> dict:
+def get_effective_config(cwd: str, overrides: Optional[dict] = None) -> dict:
     merged = DEFAULTS
     merged = _deep_merge(merged, _load_json_file(USER_CONFIG_PATH))
     merged = _deep_merge(merged, _load_json_file(project_config_path(cwd)))

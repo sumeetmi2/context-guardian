@@ -59,6 +59,9 @@ def build_handover_markdown(cwd: str, session_id: str, parent_session_id, lineag
     )
     git_state_section = "\n".join(git_state_lines)
 
+    test_status = cp.get("testStatus")
+    test_status_line = f"Test status: {test_status}" if test_status else ""
+
     decisions = _bullet_list([_fact_tag(d) for d in cp.get("decisions", [])])
     constraints = _bullet_list([_fact_tag(c) for c in cp.get("constraints", [])])
     files_inspected = _bullet_list(cp.get("filesInspected", []))
@@ -80,7 +83,7 @@ def build_handover_markdown(cwd: str, session_id: str, parent_session_id, lineag
 
 ## Current status
 {cp.get('lastCompletedAction') or 'Not recorded.'}
-{('Test status: ' + cp.get('testStatus')) if cp.get('testStatus') else ''}
+{test_status_line}
 
 ## Decisions made
 {decisions}
